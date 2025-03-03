@@ -145,11 +145,13 @@ pintos_init (void)
       while(1)
       {
         char c = input_getc();
+        // 回车换行
         if (c == 13)
         {
           printf("\n");
           break;
         }
+        // backspace
         if (c == 127)
         {
           if (index > 0) {
@@ -160,22 +162,26 @@ pintos_init (void)
         }
         if (index >= max_len) continue;
         buf[index++] = c;
+        // printable character.
         if (c > 31 && c < 127)
         {
           printf("%c", c);
         }
       }
+      // command "whoami".
       if (!strcmp(buf, "whoami"))
       {
        printf("20250227\n");
        continue; 
       }
+      // exit.
       if (!strcmp(buf, "exit"))
         break;
+      // invalid.
       printf("invalid command\n");
     }
     free(buf);
-    printf("Bye!");
+    printf("Leave kernel bash!");
   }
 
   /* Finish up. */
