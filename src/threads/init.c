@@ -134,6 +134,48 @@ pintos_init (void)
     run_actions (argv);
   } else {
     // TODO: no command line passed to kernel. Run interactively 
+    size_t max_len = 10;
+    char* buf = (char*) malloc(max_len);
+    while(1)
+    {
+      /* Print propmts. */
+      printf("WHUOS> ");
+      memset(buf,'\0',max_len);
+      size_t index = 0;
+      while(1)
+      {
+        char c = input_getc();
+        if (c == 13)
+        {
+          printf("\n");
+          break;
+        }
+        if (c == 127)
+        {
+          if (index > 0) {
+            buf[--index] = '\0';
+            printf("\b \b");
+          }
+          continue;
+        }
+        if (index >= max_len) continue;
+        buf[index++] = c;
+        if (c > 31 && c < 127)
+        {
+          printf("%c", c);
+        }
+      }
+      if (!strcmp(buf, "whoami"))
+      {
+       printf("20250227\n");
+       continue; 
+      }
+      if (!strcmp(buf, "exit"))
+        break;
+      printf("invalid command\n");
+    }
+    free(buf);
+    printf("Bye!");
   }
 
   /* Finish up. */
