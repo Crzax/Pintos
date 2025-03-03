@@ -238,7 +238,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, thread_greater_fun, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -309,7 +309,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, thread_greater_fun, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -377,6 +377,12 @@ thread_get_recent_cpu (void)
   return 0;
 }
 
+
+/** Greater fuc for thread. */
+bool thread_greater_fun (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry (a, struct thread, elem)->priority > list_entry (b, struct thread, elem)->priority;
+}
 /** Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -466,7 +472,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
-  list_push_back (&all_list, &t->allelem);
+  list_insert_ordered (&all_list, &t->allelem, thread_greater_fun, NULL);
   intr_set_level (old_level);
 }
 
