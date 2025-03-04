@@ -182,7 +182,6 @@ thread_create (const char *name, int priority,
   /* Initialize thread. */
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
-  t->blocked_ticks = 0;
 
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
@@ -244,7 +243,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered (&ready_list, &t->elem, thread_greater_fun, NULL);
+  list_insert_ordered (&ready_list, &t->elem, thread_greater_priority, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -315,7 +314,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, thread_greater_fun, NULL);
+    list_insert_ordered (&ready_list, &cur->elem, thread_greater_priority, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -342,8 +341,19 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-  thread_yield();
+  if (thread_mlfqs)
+    return;
+  enum intr_level old_level = intr_disable ();
+
+  struct thread *t = thread_current ();
+  int old_priority = t->priority;
+  t->base_priority = new_priority;
+  if (list_empty(&t->locks_holding) || new_priority > old_priority)
+  {
+    thread_current ()->priority = new_priority;
+    thread_yield();
+  }
+  intr_set_level (old_level);
 }
 
 /** Returns the current thread's priority. */
@@ -386,10 +396,71 @@ thread_get_recent_cpu (void)
 
 
 /** Greater fuc for thread. */
-bool thread_greater_fun (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+bool thread_greater_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   return list_entry (a, struct thread, elem)->priority > list_entry (b, struct thread, elem)->priority;
 }
+
+/** Donate priority. */
+void
+thread_donate_priority (struct thread *t)
+{
+  enum intr_level old_level = intr_disable ();
+  thread_update_priority (t);
+  if (t->status == THREAD_READY)
+  {
+    list_remove (&t->elem);
+    list_insert_ordered (&ready_list, &t->elem, thread_greater_priority, NULL);
+  }
+  intr_set_level (old_level);
+}
+
+/** Update priority. */
+void
+thread_update_priority (struct thread *t)
+{
+  enum intr_level old_level = intr_disable ();
+  int max_priority = t->base_priority;
+  int lock_priority;
+
+  if (!list_empty (&t->locks_holding))
+  {
+    list_sort (&t->locks_holding, lock_greater_priority, NULL);
+    lock_priority = list_entry (list_front (&t->locks_holding), struct lock, elem)->max_priority;
+    if (lock_priority > max_priority)
+      max_priority = lock_priority;
+  }
+
+  t->priority = max_priority;
+  intr_set_level (old_level);
+}
+
+/** Thread hold lock. */
+void 
+thread_hold_the_lock (struct lock* lock)
+{
+  enum intr_level old_level = intr_disable ();
+  list_insert_ordered (&thread_current ()->locks_holding, 
+                        &lock->elem, lock_greater_priority, NULL);
+  /* Maybe make no sense... */
+  // if (lock->max_priority > thread_current ()->priority)
+  // {
+  //   thread_current ()->priority = lock->max_priority;
+  //   thread_yield ();
+  // }
+  intr_set_level (old_level);
+}
+
+/** Thread remove lock. */
+void
+thread_remove_lock (struct lock *lock)
+{
+  enum intr_level old_level = intr_disable ();
+  list_remove (&lock->elem);
+  thread_update_priority (thread_current ());
+  intr_set_level (old_level);
+}
+
 /** Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -477,9 +548,13 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+  t->ticks_blocked = 0;
+  t->base_priority = priority;
+  list_init (&t->locks_holding);
+  t->lock_waiting = NULL;
 
   old_level = intr_disable ();
-  list_insert_ordered (&all_list, &t->allelem, thread_greater_fun, NULL);
+  list_insert_ordered (&all_list, &t->allelem, thread_greater_priority, NULL);
   intr_set_level (old_level);
 }
 

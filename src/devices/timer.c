@@ -98,7 +98,7 @@ timer_sleep (int64_t ticks)
   /** 关闭中断防止设置完block_ticks还没block就转到其他线程，
    * 那么就不会自减block_ticks从而sleep时间错误 */ 
   enum intr_level old_level = intr_disable ();
-  t->blocked_ticks = ticks;
+  t->ticks_blocked = ticks;
   thread_block ();
   intr_set_level (old_level);
 }
@@ -178,7 +178,7 @@ void check_blocked_thread (struct thread* t)
 {
   if (t->status == THREAD_BLOCKED && ticks > 0)
   {
-    if (--t->blocked_ticks==0)
+    if (--t->ticks_blocked==0)
       thread_unblock (t);
   }
 }
