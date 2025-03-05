@@ -1,73 +1,32 @@
-#include <stdint.h>
+#ifndef __THREAD_FIXED_POINT_H
+#define __THREAD_FIXED_POINT_H
 
-#define F 16384
+/* Basic definitions of fixed point. */
+typedef int fixed_t;
+/* 16 LSB used for fractional part. */
+#define FP_SHIFT_AMOUNT 14
+/* Convert a value to fixed-point value. */
+#define FP_CONST(A) ((fixed_t)(A << FP_SHIFT_AMOUNT))
+/* Get integer part of a fixed-point value. */
+#define FP_INT_PART(A) (A >> FP_SHIFT_AMOUNT)
+/* Get rounded integer of a fixed-point value. */
+#define FP_ROUND(A) (A >= 0 ? ((A + (1 << (FP_SHIFT_AMOUNT - 1))) >> FP_SHIFT_AMOUNT) \
+        : ((A - (1 << (FP_SHIFT_AMOUNT - 1))) >> FP_SHIFT_AMOUNT))
+/* Add two fixed-point value. */
+#define FP_ADD(A,B) (A + B)
+/* Substract two fixed-point value. */
+#define FP_SUB(A,B) (A - B)
+/* Add a fixed-point value A and an int value B. */
+#define FP_ADD_MIX(A,B) (A + (B << FP_SHIFT_AMOUNT))
+/* Substract an int value B from a fixed-point value A */
+#define FP_SUB_MIX(A,B) (A - (B << FP_SHIFT_AMOUNT))
+/* Multiply two fixed-point value. */
+#define FP_MULT(A,B) ((fixed_t)(((int64_t) A) * B >> FP_SHIFT_AMOUNT))
+/* Multiply a fixed-point value A by an int value B. */
+#define FP_MULT_MIX(A,B) (A * B)
+/* Divide two fixed-point value. */
+#define FP_DIV(A,B) ((fixed_t)((((int64_t) A) << FP_SHIFT_AMOUNT) / B))
+/* Divide a fixed-point value A by an int value B. */
+#define FP_DIV_MIX(A,B) (A / B)
 
-int tofxpt(int a);
-int tointfloor(int a);
-int tointround(int a);
-int addin(int a, int b);
-int addfx(int a, int b);
-int subin(int a, int b);
-int subfx(int a, int b);
-int mulin(int a, int b);
-int mulfx(int a, int b);
-int divin(int a, int b);
-int divfx(int a, int b);
-
-int tofxpt(int a)
-{
-	return a * F;
-}
-
-int tointfloor(int a)
-{
-	return a / F;
-}
-
-int tointround(int a)
-{
-	if (a>=0)
-		return (a + F/2) / F;
-	else
-		return (a - F/2) / F;
-}
-
-int addin(int a, int b)
-{
-	return a + (b * F);
-}
-
-int addfx(int a, int b)
-{
-	return a + b;
-}
-
-int subin(int a, int b)
-{
-	return a - (b * F);
-}
-
-int subfx(int a, int b)
-{
-	return a - b;
-}
-
-int mulin(int a, int b)
-{
-	return a * b;
-}
-
-int mulfx(int a, int b)
-{
-	return ((int64_t) a) * b / F;
-}
-
-int divin(int a, int b)
-{
-	return a / b;
-}
-
-int divfx(int a, int b)
-{
-	return ((int64_t) a) * F / b;
-}
+#endif /* thread/fixed_point.h */
