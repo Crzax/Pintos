@@ -19,6 +19,7 @@
 
 /** Number of timer ticks since OS booted. */
 static int64_t ticks;
+struct list sleep_list;
 
 /** Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -37,6 +38,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init (&sleep_list);
 }
 
 /** Calibrates loops_per_tick, used to implement brief delays. */
@@ -99,6 +101,7 @@ timer_sleep (int64_t ticks)
    * 那么就不会自减block_ticks从而sleep时间错误 */ 
   enum intr_level old_level = intr_disable ();
   t->ticks_blocked = ticks;
+  list_insert_ordered (&sleep_list, &t->elem, cmp_waketick, NULL);
   thread_block ();
   intr_set_level (old_level);
 }
@@ -188,7 +191,20 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
-  thread_foreach (check_blocked_thread, NULL);
+  
+  struct list_elem *e = list_begin(&sleep_list);
+  while (e != list_end(&sleep_list)) {
+    struct thread *t = list_entry(e, struct thread, elem);
+    t->ticks_blocked--;
+    if (t->ticks_blocked <= 0) {
+      struct list_elem *next = list_next(e);  // 保存下一个元素
+      list_remove(e);                         // 移除当前元素
+      thread_unblock(t);                      // 唤醒线程（临时保留，见下一步）
+      e = next;                               // 移动到下一个元素
+    } else {
+      e = list_next(e);
+    }
+  }
 }
 
 /** Returns true if LOOPS iterations waits for more than one timer

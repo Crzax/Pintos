@@ -431,7 +431,13 @@ thread_get_recent_cpu (void)
   return tointround(mulin(thread_current()->recent_cpu,100)) ;
 }
 
+bool cmp_waketick(struct list_elem *first, struct list_elem *second, void *aux)
+{
+  struct thread *fthread = list_entry (first, struct thread, elem);
+  struct thread *sthread = list_entry (second, struct thread, elem);
 
+  return fthread->ticks_blocked < sthread->ticks_blocked;
+}
 /** Greater fuc for thread. */
 bool thread_greater_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {

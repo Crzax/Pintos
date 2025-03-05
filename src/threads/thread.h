@@ -150,4 +150,5 @@ void thread_donate_priority (struct thread *t);
 void thread_hold_the_lock (struct lock* lock);
 void thread_remove_lock (struct lock *lock);
 void thread_update_priority (struct thread *t);
+bool cmp_waketick(struct list_elem *first, struct list_elem *second, void *aux);
 #endif /**< threads/thread.h */
