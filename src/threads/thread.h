@@ -93,7 +93,8 @@ struct thread
     int base_priority;                  /**< Base priotiry. */
     struct list locks_holding;          /**< Holding locks. */
     struct lock *lock_waiting;          /**< Waiting lock */
-
+    int nice;
+    int recent_cpu;
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /**< List element. */
 
@@ -110,6 +111,7 @@ struct thread
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
+int load_avg;
 
 void thread_init (void);
 void thread_start (void);

@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "fixed-point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -133,7 +134,42 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
+  if(thread_mlfqs)
+  {
+    if(strcmp(t->name,"idle")!=0)
+    {
+      t->recent_cpu = addin(t->recent_cpu, 1);
+    }
 
+    if(timer_ticks() % 100 == 0)
+    {
+      struct list_elem *e;
+      int temp, i=0;
+
+      load_avg = addfx(divin(mulin(load_avg, 59), 60), divin(tofxpt(list_size(&ready_list) + (strcmp(running_thread()->name,"idle")==0?0:1)), 60));
+
+      temp = divfx(mulin(load_avg, 2),addin(mulin(load_avg, 2), 1));
+
+      for (e = list_begin (&all_list); e != list_end (&all_list);
+          e = list_next (e))
+      {
+        struct thread *f = list_entry (e, struct thread, allelem);
+        f->recent_cpu = addin(mulfx(temp, f->recent_cpu),f->nice);
+      }
+    }
+
+    if(timer_ticks() % 4 == 0)
+    {
+      struct list_elem *e;
+      for (e = list_begin (&all_list); e != list_end (&all_list);
+          e = list_next (e))
+      {
+        struct thread *f = list_entry (e, struct thread, allelem);
+        f->priority = PRI_MAX - tointround(divin(f->recent_cpu,4)) - (f->nice * 2);
+      }
+    }
+  }
+  
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -368,6 +404,7 @@ void
 thread_set_nice (int nice UNUSED) 
 {
   /* Not yet implemented. */
+  thread_current ()->nice = nice;
 }
 
 /** Returns the current thread's nice value. */
@@ -375,7 +412,7 @@ int
 thread_get_nice (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return thread_current()->nice;
 }
 
 /** Returns 100 times the system load average. */
@@ -383,7 +420,7 @@ int
 thread_get_load_avg (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return tointround(mulin(load_avg,100));
 }
 
 /** Returns 100 times the current thread's recent_cpu value. */
@@ -391,7 +428,7 @@ int
 thread_get_recent_cpu (void) 
 {
   /* Not yet implemented. */
-  return 0;
+  return tointround(mulin(thread_current()->recent_cpu,100)) ;
 }
 
 
@@ -546,7 +583,18 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+  if(thread_mlfqs)
+  {
+    if(strcmp(t->name,"main")==0)
+      t->recent_cpu = 0;
+    else
+      t->recent_cpu = divin(thread_get_recent_cpu(),100);
+
+    priority = PRI_MAX - tointround(divin(t->recent_cpu,4)) - (t->nice * 2);
+      
+  }
+  else
+    t->priority = priority;
   t->magic = THREAD_MAGIC;
   t->ticks_blocked = 0;
   t->base_priority = priority;
