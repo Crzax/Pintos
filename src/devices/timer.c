@@ -190,6 +190,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
 
+  /* Check sleep. */
   while (!list_empty (&sleep_list))
   {
     e = list_front (&sleep_list);
@@ -198,6 +199,16 @@ timer_interrupt (struct intr_frame *args UNUSED)
       break;
     list_remove (e);
     thread_unblock (t);
+  }
+
+  /* MLFQS check. */
+  if (thread_mlfqs)
+  {
+    thread_mlfqs_increase_recent_cpu_by_one ();
+    if (ticks % TIMER_FREQ == 0)
+      thread_mlfqs_update_load_avg_and_recent_cpu ();
+    else if (ticks % 4 == 0)
+      thread_mlfqs_update_priority (thread_current ());
   }
 }
 
