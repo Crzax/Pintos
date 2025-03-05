@@ -218,9 +218,8 @@ lock_acquire (struct lock *lock)
   }
   /* Get lock. */
   sema_down (&lock->semaphore);
-  /**
-   *  Ensure lock's owner change correctly.
-   *  (Get lock correctly.) */
+  /** Ensure lock's owner change correctly.
+     (Get lock correctly.) */
   old_level = intr_disable ();    
   t = thread_current ();
   /* Change lock max priority. */
@@ -273,10 +272,8 @@ lock_release (struct lock *lock)
     thread_remove_lock(lock);
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-  enum intr_level old_level = intr_disable ();
   lock->holder = NULL;
   sema_up (&lock->semaphore);   /**< Schedule in sema_up. */
-  intr_set_level (old_level);
 }
 
 /** Returns true if the current thread holds LOCK, false

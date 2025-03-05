@@ -100,8 +100,10 @@ timer_sleep (int64_t ticks)
   ASSERT (intr_get_level () == INTR_ON);
 
   struct thread * t = thread_current ();
-  /** 关闭中断防止设置完block_ticks还没block就转到其他线程，
-   * 那么就不会自减block_ticks从而sleep时间错误 */ 
+  /** Disable interrupts to prevent the thread from jumping to other threads 
+     after setting block_ticks but before blocking.
+     Then block_ticks will not be decremented, resulting in incorrect sleep time. 
+     The sleep list is a critical resource */ 
   enum intr_level old_level = intr_disable ();
   t->ticks_blocked = timer_ticks () + ticks;
   list_insert_ordered (&sleep_list, &t->elem, thread_less_ticks_blocked, NULL);

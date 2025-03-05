@@ -402,13 +402,15 @@ thread_get_recent_cpu (void)
 
 
 /** Less fuc for thread. */
-bool thread_less_ticks_blocked (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+bool 
+thread_less_ticks_blocked (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   return list_entry (a, struct thread, elem)->ticks_blocked < list_entry (b, struct thread, elem)->ticks_blocked;
 }
 
 /** Greater fuc for thread. */
-bool thread_greater_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+bool 
+thread_greater_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
   return list_entry (a, struct thread, elem)->priority > list_entry (b, struct thread, elem)->priority;
 }
