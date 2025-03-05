@@ -148,4 +148,5 @@ void thread_donate_priority (struct thread *t);
 void thread_hold_the_lock (struct lock* lock);
 void thread_remove_lock (struct lock *lock);
 void thread_update_priority (struct thread *t);
+bool thread_less_ticks_blocked (const struct list_elem *a, const struct list_elem *b, void *aux);
 #endif /**< threads/thread.h */

@@ -17,6 +17,10 @@
 #error TIMER_FREQ <= 1000 recommended
 #endif
 
+/** List of processes in THREAD_BLOCKED(SLEEP) state, that is, processes
+   that are blocked by calling sleep. */
+static struct list sleep_list;
+
 /** Number of timer ticks since OS booted. */
 static int64_t ticks;
 
@@ -37,6 +41,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  list_init (&sleep_list);
 }
 
 /** Calibrates loops_per_tick, used to implement brief delays. */
@@ -98,7 +103,8 @@ timer_sleep (int64_t ticks)
   /** 关闭中断防止设置完block_ticks还没block就转到其他线程，
    * 那么就不会自减block_ticks从而sleep时间错误 */ 
   enum intr_level old_level = intr_disable ();
-  t->ticks_blocked = ticks;
+  t->ticks_blocked = timer_ticks () + ticks;
+  list_insert_ordered (&sleep_list, &t->elem, thread_less_ticks_blocked, NULL);
   thread_block ();
   intr_set_level (old_level);
 }
@@ -173,22 +179,26 @@ timer_print_stats (void)
   printf ("Timer: %"PRId64" ticks\n", timer_ticks ());
 }
 
-/** Check blocked thread. */
-void check_blocked_thread (struct thread* t)
-{
-  if (t->status == THREAD_BLOCKED && ticks > 0)
-  {
-    if (--t->ticks_blocked==0)
-      thread_unblock (t);
-  }
-}
+
 /** Timer interrupt handler. */
 static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
+  struct list_elem* e;
+  struct thread* t;
+
   ticks++;
   thread_tick ();
-  thread_foreach (check_blocked_thread, NULL);
+
+  while (!list_empty (&sleep_list))
+  {
+    e = list_front (&sleep_list);
+    t = list_entry (e, struct thread, elem);
+    if (t->ticks_blocked > timer_ticks ())
+      break;
+    list_remove (e);
+    thread_unblock (t);
+  }
 }
 
 /** Returns true if LOOPS iterations waits for more than one timer

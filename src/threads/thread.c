@@ -133,7 +133,7 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-
+  
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
@@ -395,6 +395,12 @@ thread_get_recent_cpu (void)
 }
 
 
+/** Less fuc for thread. */
+bool thread_less_ticks_blocked (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  return list_entry (a, struct thread, elem)->ticks_blocked < list_entry (b, struct thread, elem)->ticks_blocked;
+}
+
 /** Greater fuc for thread. */
 bool thread_greater_priority (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
 {
@@ -546,7 +552,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+    t->priority = priority;
   t->magic = THREAD_MAGIC;
   t->ticks_blocked = 0;
   t->base_priority = priority;
