@@ -618,7 +618,7 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->locks_holding);
   t->lock_waiting = NULL;
   t->nice = 0;
-  if (name=="main")
+  if (!strcmp(name, "main"))
     t->recent_cpu = FP_CONST (0);
   else
     t->recent_cpu = thread_current ()->recent_cpu;

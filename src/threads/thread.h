@@ -145,6 +145,9 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+void thread_mlfqs_increase_recent_cpu_by_one (void);
+void thread_mlfqs_update_load_avg_and_recent_cpu (void);
+void thread_mlfqs_update_priority (struct thread *t);
 
 /** Auxiliary functions. */
 bool thread_greater_priority (const struct list_elem *a, const struct list_elem *b, void *aux);
@@ -153,4 +156,5 @@ void thread_hold_the_lock (struct lock* lock);
 void thread_remove_lock (struct lock *lock);
 void thread_update_priority (struct thread *t);
 bool thread_less_ticks_blocked (const struct list_elem *a, const struct list_elem *b, void *aux);
+
 #endif /**< threads/thread.h */
