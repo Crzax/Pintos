@@ -22,7 +22,9 @@
 static void syscall_handler (struct intr_frame *);
 
 /** Helper Functions.*/
+static void check_user (const uint8_t *uaddr);
 static int32_t get_user (const uint8_t *uaddr);
+static bool put_user (uint8_t *udst, uint8_t byte);
 static int memread_user (void *src, void *des, size_t bytes);
 static struct file_desc* find_file_desc(struct thread *, int fd);
 
@@ -61,12 +63,10 @@ static void
 syscall_handler (struct intr_frame *f UNUSED) 
 {
   int syscall_number;
-  /* The system call number is in the 32-bit word at 
-  the caller's stack pointer. */
-  if (memread_user(f->esp, &syscall_number, sizeof(syscall_number)) == -1) {
-    thread_exit (); // invalid memory access, terminate the user process
-    return;
-  }
+  ASSERT( sizeof(syscall_number) == 4 ); // assuming x86
+
+  // The system call number is in the 32-bit word at the caller's stack pointer.
+  memread_user(f->esp, &syscall_number, sizeof(syscall_number));
 
   _DEBUG_PRINTF ("[DEBUG] system call, number = %d!\n", syscall_number);
 
@@ -83,9 +83,8 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_EXIT:
       {
         int exitcode;
-        if (memread_user(f->esp + 4, &exitcode, sizeof(exitcode)) == -1)
-          fail_invalid_access(); /**< invalid memory access */ 
-  
+        memread_user(f->esp + 4, &exitcode, sizeof(exitcode));
+
         sys_exit(exitcode);
         NOT_REACHED();
         break;
@@ -94,8 +93,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_EXEC:
       {
         void* cmdline;
-        if (memread_user(f->esp + 4, &cmdline, sizeof(cmdline)) == -1)
-          fail_invalid_access(); /**<  invalid memory access. */
+        memread_user(f->esp + 4, &cmdline, sizeof(cmdline));
 
         int return_code = sys_exec((const char*) cmdline);
         f->eax = (uint32_t) return_code;
@@ -104,8 +102,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_WAIT:
       {
         pid_t pid;
-        if (memread_user(f->esp + 4, &pid, sizeof(pid_t)) == -1)
-          fail_invalid_access();
+        memread_user(f->esp + 4, &pid, sizeof(pid_t));
 
         int ret = sys_wait(pid);
         f->eax = (uint32_t) ret;
@@ -116,10 +113,8 @@ syscall_handler (struct intr_frame *f UNUSED)
         const char* filename;
         unsigned initial_size;
         bool return_code;
-        if (memread_user(f->esp + 4, &filename, sizeof(filename)) == -1)
-          fail_invalid_access(); // invalid memory access
-        if (memread_user(f->esp + 8, &initial_size, sizeof(initial_size)) == -1)
-          fail_invalid_access(); // invalid memory access
+        memread_user(f->esp + 4, &filename, sizeof(filename));
+        memread_user(f->esp + 8, &initial_size, sizeof(initial_size));
 
         return_code = sys_create(filename, initial_size);
         f->eax = return_code;
@@ -129,8 +124,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       {
         const char* filename;
         bool return_code;
-        if (memread_user(f->esp + 4, &filename, sizeof(filename)) == -1)
-          fail_invalid_access(); // invalid memory access
+        memread_user(f->esp + 4, &filename, sizeof(filename));
 
         return_code = sys_remove(filename);
         f->eax = return_code;
@@ -141,8 +135,8 @@ syscall_handler (struct intr_frame *f UNUSED)
         const char* filename;
         int return_code;
 
-        if (memread_user(f->esp + 4, &filename, sizeof(filename)) == -1)
-          fail_invalid_access(); // invalid memory access
+        memread_user(f->esp + 4, &filename, sizeof(filename));
+
         return_code = sys_open(filename);
         f->eax = return_code;
         break;
@@ -150,8 +144,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_FILESIZE:
       {
         int fd, return_code;
-        if (memread_user(f->esp + 4, &fd, sizeof(fd)) == -1)
-          fail_invalid_access(); // invalid memory access
+        memread_user(f->esp + 4, &fd, sizeof(fd));
 
         return_code = sys_filesize(fd);
         f->eax = return_code;
@@ -163,9 +156,9 @@ syscall_handler (struct intr_frame *f UNUSED)
         void *buffer;
         unsigned size;
 
-        if(-1 == memread_user(f->esp + 4, &fd, 4)) fail_invalid_access();
-        if(-1 == memread_user(f->esp + 8, &buffer, 4)) fail_invalid_access();
-        if(-1 == memread_user(f->esp + 12, &size, 4)) fail_invalid_access();
+        memread_user(f->esp + 4, &fd, sizeof(fd));
+        memread_user(f->esp + 8, &buffer, sizeof(buffer));
+        memread_user(f->esp + 12, &size, sizeof(size));
 
         return_code = sys_read(fd, buffer, size);
         f->eax = (uint32_t) return_code;
@@ -177,10 +170,9 @@ syscall_handler (struct intr_frame *f UNUSED)
       const void *buffer;
       unsigned size;
 
-      // TODO some error messages
-      if(-1 == memread_user(f->esp + 4, &fd, 4)) fail_invalid_access();
-      if(-1 == memread_user(f->esp + 8, &buffer, 4)) fail_invalid_access();
-      if(-1 == memread_user(f->esp + 12, &size, 4)) fail_invalid_access();
+      memread_user(f->esp + 4, &fd, sizeof(fd));
+      memread_user(f->esp + 8, &buffer, sizeof(buffer));
+      memread_user(f->esp + 12, &size, sizeof(size));
 
       return_code = sys_write(fd, buffer, size);
       f->eax = (uint32_t) return_code;
@@ -191,8 +183,8 @@ syscall_handler (struct intr_frame *f UNUSED)
         int fd;
         unsigned position;
 
-        if(-1 == memread_user(f->esp + 4, &fd, sizeof fd)) fail_invalid_access();
-        if(-1 == memread_user(f->esp + 8, &position, sizeof position)) fail_invalid_access();
+        memread_user(f->esp + 4, &fd, sizeof(fd));
+        memread_user(f->esp + 8, &position, sizeof(position));
 
         sys_seek(fd, position);
         break;
@@ -202,7 +194,7 @@ syscall_handler (struct intr_frame *f UNUSED)
         int fd;
         unsigned return_code;
 
-        if(-1 == memread_user(f->esp + 4, &fd, 4)) fail_invalid_access();
+        memread_user(f->esp + 4, &fd, sizeof(fd));
 
         return_code = sys_tell(fd);
         f->eax = (uint32_t) return_code;
@@ -211,8 +203,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_CLOSE:
       {
         int fd;
-        if (memread_user(f->esp + 4, &fd, sizeof(fd)) == -1)
-          fail_invalid_access(); // invalid memory access
+        memread_user(f->esp + 4, &fd, sizeof(fd));
 
         sys_close(fd);
         break;
@@ -251,8 +242,7 @@ pid_t sys_exec(const char *cmdline) {
 
   /* cmdline is an address to the character buffer, on user memory
     so a validation check is required. */
-  if (get_user((const uint8_t*) cmdline) == -1) 
-    fail_invalid_access();
+  check_user((const uint8_t*) cmdline);
 
   pid_t pid = process_execute(cmdline);
   return pid;
@@ -268,9 +258,8 @@ bool sys_create(const char* filename, unsigned initial_size)
 {
   bool return_code;
   // memory validation
-  if (get_user((const uint8_t*) filename) == -1) {
-    fail_invalid_access();
-  }
+  check_user((const uint8_t*) filename);
+
   return_code = filesys_create(filename, initial_size);
   return return_code;
 }
@@ -279,22 +268,19 @@ bool sys_remove(const char* filename)
 {
   bool return_code;
   // memory validation
-  if (get_user((const uint8_t*) filename) == -1) {
-   fail_invalid_access();
-  }
+  check_user((const uint8_t*) filename);
 
   return_code = filesys_remove(filename);
   return return_code;
 }
 
 int sys_open(const char* file) {
+  // memory validation
+  check_user((const uint8_t*) file);
+  
   struct file* file_opened;
   struct file_desc* fd = palloc_get_page(0);
 
-  // memory validation
-  if (get_user((const uint8_t*) file) == -1) {
-    fail_invalid_access();
-  }
 
   file_opened = filesys_open(file);
   if (!file_opened) {
@@ -359,15 +345,14 @@ void sys_close(int fd) {
 }
 
 int sys_read(int fd, void *buffer, unsigned size) {
-  // memory validation
-  if (get_user((const uint8_t*) buffer) == -1) {
-    fail_invalid_access();
-  }
+   // memory validation : [buffer+0, buffer+size) should be all valid
+   check_user((const uint8_t*) buffer);
+   check_user((const uint8_t*) buffer + size - 1);
 
   if(fd == 0) { // stdin
     unsigned i;
     for(i = 0; i < size; ++i) {
-      ((uint8_t *)buffer)[i] = input_getc();
+      put_user(buffer + i, input_getc());
     }
     return size;
   }
@@ -384,10 +369,9 @@ int sys_read(int fd, void *buffer, unsigned size) {
 }
 
 int sys_write(int fd, const void *buffer, unsigned size) {
-  // memory validation
-  if (get_user((const uint8_t*) buffer) == -1) {
-    fail_invalid_access();
-  }
+  // memory validation : [buffer+0, buffer+size) should be all valid
+  check_user((const uint8_t*) buffer);
+  check_user((const uint8_t*) buffer + size - 1);
 
   if(fd == 1) { // write to stdout
     putbuf(buffer, size);
@@ -406,8 +390,20 @@ int sys_write(int fd, const void *buffer, unsigned size) {
 }
 
 /****************** Helper Functions on Memory Access ********************/
+static void
+check_user (const uint8_t *uaddr) {
+  // check uaddr range or segfaults
+  if(get_user (uaddr) == -1)
+    fail_invalid_access();
+}
 
-static int32_t
+/**
+ * Reads a single 'byte' at user memory admemory at 'uaddr'.
+ * 'uaddr' must be below PHYS_BASE.
+ *
+ * Returns the byte value if successful (extract the least significant byte),
+ * or -1 in case of error (a segfault occurred or invalid uaddr)
+ */
 get_user (const uint8_t *uaddr) {
   /* check that a user pointer `uaddr` points below PHYS_BASE*/
   if (! ((void*)uaddr < PHYS_BASE))
@@ -418,6 +414,22 @@ get_user (const uint8_t *uaddr) {
   asm ("movl $1f, %0; movzbl %1, %0; 1:"
       : "=&a" (result) : "m" (*uaddr));
   return result;
+}
+
+
+/* Writes a single byte (content is 'byte') to user address 'udst'.
+ * 'udst' must be below PHYS_BASE.
+ *
+ * Returns true if successful, false if a segfault occurred.
+ */
+static bool
+put_user (uint8_t *udst, uint8_t byte) {
+  int error_code;
+
+  // as suggested in the reference manual, see (3.1.5)
+  asm ("movl $1f, %0; movb %b2, %1; 1:"
+      : "=&a" (error_code), "=m" (*udst) : "q" (byte));
+  return error_code != -1;
 }
 
 /** Reads a consecutive `bytes` bytes of user memory with the
@@ -431,7 +443,8 @@ memread_user (void *src, void *dst, size_t bytes)
   size_t i;
   for(i=0; i<bytes; i++) {
     value = get_user(src + i);
-    if(value < 0) return -1; /**< invalid memory access. */ 
+    if(value == -1) // segfault or invalid memory access
+      fail_invalid_access();
     *(char*)(dst + i) = value & 0xff;
   }
   return (int)bytes;
