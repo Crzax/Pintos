@@ -51,6 +51,7 @@ static long long idle_ticks;    /**< # of timer ticks spent idle. */
 static long long kernel_ticks;  /**< # of timer ticks in kernel threads. */
 static long long user_ticks;    /**< # of timer ticks in user programs. */
 fixed_t load_avg;               /**< Load average. */
+static bool schedule_started;
 
 /** Scheduling. */
 #define TIME_SLICE 4            /**< # of timer ticks to give each thread. */
@@ -107,6 +108,7 @@ thread_init (void)
 void
 thread_start (void) 
 {
+  schedule_started = true;
   /* Create the idle thread. */
   struct semaphore idle_started;
   sema_init (&idle_started, 0);
@@ -312,6 +314,8 @@ thread_exit (void)
 void
 thread_yield (void) 
 {
+  if (!schedule_started)
+    return;
   struct thread *cur = thread_current ();
   enum intr_level old_level;
   
