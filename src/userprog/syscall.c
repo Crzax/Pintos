@@ -5,7 +5,15 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#ifdef DEBUG
+#define _DEBUG_PRINTF(...) printf(__VA_ARGS__)
+#else
+#define _DEBUG_PRINTF(...) /* do nothing */
+#endif
+
 static void syscall_handler (struct intr_frame *);
+
+typedef int pid_t;
 
 /** Helper Functions.*/
 static int32_t get_user (const uint8_t *uaddr);
@@ -15,11 +23,19 @@ static int memread_user (void *src, void *des, size_t bytes);
 void sys_halt (void);
 void sys_exit (int);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
+pid_t sys_exec (const char *cmdline);
 
 void
 syscall_init (void) 
 {
   intr_register_int (0x30, 3, INTR_ON, syscall_handler, "syscall");
+}
+
+/** Invalid memory access, fail and exit. */ 
+static int 
+fail_invalid_access(void) {
+  sys_exit (-1);
+  NOT_REACHED();
 }
 
 static void
@@ -32,6 +48,8 @@ syscall_handler (struct intr_frame *f UNUSED)
     thread_exit (); // invalid memory access, terminate the user process
     return;
   }
+  
+  _DEBUG_PRINTF ("[DEBUG] system call, number = %d!\n", syscall_number);
 
   /* Dispatch w.r.t system call number
    SYS_*** constants are defined in syscall-nr.h */
@@ -47,7 +65,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       {
         int exitcode;
         if (memread_user(f->esp + 4, &exitcode, sizeof(exitcode)) == -1)
-          thread_exit(); /**< invalid memory access */ 
+          fail_invalid_access(); /**< invalid memory access */ 
   
         sys_exit(exitcode);
         NOT_REACHED();
@@ -55,6 +73,15 @@ syscall_handler (struct intr_frame *f UNUSED)
       }
   
     case SYS_EXEC:
+      {
+        void* cmdline;
+        if (memread_user(f->esp + 4, &cmdline, sizeof(cmdline)) == -1)
+          fail_invalid_access(); /**<  invalid memory access. */
+
+        int return_code = sys_exec((const char*) cmdline);
+        f->eax = (uint32_t) return_code;
+        break;
+      }
     case SYS_WAIT:
     case SYS_CREATE:
     case SYS_REMOVE:
@@ -69,11 +96,11 @@ syscall_handler (struct intr_frame *f UNUSED)
       unsigned size;
 
       // TODO some error messages
-      if(-1 == memread_user(f->esp + 4, &fd, 4)) thread_exit();
-      if(-1 == memread_user(f->esp + 8, &buffer, 4)) thread_exit();
-      if(-1 == memread_user(f->esp + 12, &size, 4)) thread_exit();
+      if(-1 == memread_user(f->esp + 4, &fd, 4)) fail_invalid_access();
+      if(-1 == memread_user(f->esp + 8, &buffer, 4)) fail_invalid_access();
+      if(-1 == memread_user(f->esp + 12, &size, 4)) fail_invalid_access();
 
-      if(!sys_write(fd, buffer, size, &return_code)) thread_exit();
+      if(!sys_write(fd, buffer, size, &return_code)) fail_invalid_access();
       f->eax = (uint32_t) return_code;
       break;
     }
@@ -98,7 +125,8 @@ void sys_halt(void) {
 void sys_exit(int status UNUSED) {
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
-  // TODO
+  /* TODO set return code : status
+    PASS status into kernel. */ 
   thread_exit();
 }
 
@@ -121,6 +149,22 @@ bool sys_write(int fd, const void *buffer, unsigned size, int* ret) {
     printf("[ERROR] sys_write unimplemented\n");
   }
   return false;
+}
+
+pid_t sys_exec(const char *cmdline) {
+  _DEBUG_PRINTF ("[DEBUG] Exec : %s\n", cmdline);
+  while(true);
+
+  /* cmdline is an address to the character buffer, on user memory
+    so a validation check is required. */
+  if (get_user((const uint8_t*) cmdline) == -1) {
+    /* invalid memory access */
+    thread_exit();
+    return -1;
+  }
+
+  tid_t child_tid = process_execute(cmdline);
+  return child_tid;
 }
 
 /****************** Helper Functions on Memory Access ********************/
