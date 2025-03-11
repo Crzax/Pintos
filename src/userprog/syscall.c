@@ -248,15 +248,14 @@ void sys_exit(int status UNUSED) {
 
 pid_t sys_exec(const char *cmdline) {
   _DEBUG_PRINTF ("[DEBUG] Exec : %s\n", cmdline);
-  while(true);
 
   /* cmdline is an address to the character buffer, on user memory
     so a validation check is required. */
   if (get_user((const uint8_t*) cmdline) == -1) 
     fail_invalid_access();
 
-  tid_t child_tid = process_execute(cmdline);
-  return child_tid;
+  pid_t pid = process_execute(cmdline);
+  return pid;
 }
 
 int sys_wait(pid_t pid) 

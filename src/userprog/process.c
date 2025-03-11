@@ -32,7 +32,7 @@ void push_argument (void **esp, int argc, int argv[]);
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
    thread id, or TID_ERROR if the thread cannot be created. */
-tid_t
+pid_t
 process_execute (const char *file_name) 
 {
   char *cmd_all_1, *cmd_all_2;
@@ -78,7 +78,7 @@ process_execute (const char *file_name)
 
    // process successfully created, maintain child process list
    list_push_back (&(thread_current()->child_list), &(pcb->elem));
-  return tid;
+  return pcb->pid;
 }
 
 /** For Task 1:
@@ -238,6 +238,10 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   uint32_t *pd;
+
+  /* Release file for the executable */
+  if(cur -> executing_file)
+    file_close(cur -> executing_file);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */

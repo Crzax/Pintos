@@ -633,11 +633,12 @@ init_thread (struct thread *t, const char *name, int priority)
   list_insert_ordered (&all_list, &t->allelem, thread_greater_priority, NULL);
   intr_set_level (old_level);
 
-  #ifdef USERPROG
+#ifdef USERPROG
   list_init(&t->child_list);
   t->pcb = NULL;
   list_init(&t->file_descriptors);
-  #endif
+  t->executing_file = NULL;
+#endif
 }
 
 /** Allocates a SIZE-byte frame at the top of thread T's stack and
