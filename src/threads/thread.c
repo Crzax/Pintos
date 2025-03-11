@@ -634,9 +634,9 @@ init_thread (struct thread *t, const char *name, int priority)
   intr_set_level (old_level);
 
   #ifdef USERPROG
-  // init process-related informations.
   list_init(&t->child_list);
   t->pcb = NULL;
+  list_init(&t->file_descriptors);
   #endif
 }
 

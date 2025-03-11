@@ -16,10 +16,15 @@ void process_activate (void);
 struct process_control_block {
 
     pid_t pid;                /* The pid of process */
-  
     const char* cmdline;      /* The command line of this process being executed */
-  
     struct list_elem elem;    /* element for thread.child_list */
+};
+
+struct file_desc 
+{
+    int id;
+    struct list_elem elem;
+    struct file* file;
 };
 
 #endif /**< userprog/process.h */

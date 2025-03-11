@@ -5,6 +5,11 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "userprog/process.h"
+#include "filesys/filesys.h"
+#include "filesys/file.h"
+#include "threads/palloc.h"
+#include "threads/synch.h"
+#include "lib/kernel/list.h"
 
 #ifdef DEBUG
 #define _DEBUG_PRINTF(...) printf(__VA_ARGS__)
@@ -17,6 +22,7 @@ static void syscall_handler (struct intr_frame *);
 /** Helper Functions.*/
 static int32_t get_user (const uint8_t *uaddr);
 static int memread_user (void *src, void *des, size_t bytes);
+static struct file_desc* find_file_desc(int fd);
 
 /** Syscall Functions definition. */
 void sys_halt (void);
@@ -24,6 +30,13 @@ void sys_exit (int);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 pid_t sys_exec (const char *cmdline);
 int sys_wait(pid_t pid);
+bool sys_create(const char* filename, unsigned initial_size);
+bool sys_remove(const char* filename);
+int sys_open(const char* file);
+void sys_close(int fd);
+int sys_filesize(int fd);
+
+struct lock filesys_lock;
 
 void
 syscall_init (void) 
@@ -93,9 +106,41 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
       }
     case SYS_CREATE:
+      {
+        const char* filename;
+        unsigned initial_size;
+        bool return_code;
+        if (memread_user(f->esp + 4, &filename, sizeof(filename)) == -1)
+          fail_invalid_access(); // invalid memory access
+        if (memread_user(f->esp + 8, &initial_size, sizeof(initial_size)) == -1)
+          fail_invalid_access(); // invalid memory access
+
+        return_code = sys_create(filename, initial_size);
+        f->eax = return_code;
+        break;
+      }
     case SYS_REMOVE:
     case SYS_OPEN:
+      {
+        const char* filename;
+        int return_code;
+
+        if (memread_user(f->esp + 4, &filename, sizeof(filename)) == -1)
+          fail_invalid_access(); // invalid memory access
+        return_code = sys_open(filename);
+        f->eax = return_code;
+        break;
+      }
     case SYS_FILESIZE:
+      {
+        int fd, return_code;
+        if (memread_user(f->esp + 4, &fd, sizeof(fd)) == -1)
+          fail_invalid_access(); // invalid memory access
+
+        return_code = sys_filesize(fd);
+        f->eax = return_code;
+        break;
+      }
     case SYS_READ:
       goto unhandled;
     case SYS_WRITE:
@@ -116,7 +161,15 @@ syscall_handler (struct intr_frame *f UNUSED)
     case SYS_SEEK:
     case SYS_TELL:
     case SYS_CLOSE:
-  
+      {
+        int fd;
+        if (memread_user(f->esp + 4, &fd, sizeof(fd)) == -1)
+          fail_invalid_access(); // invalid memory access
+
+        sys_close(fd);
+        break;
+      }
+    
     /* unhandled case */
 unhandled:
     default:
@@ -173,9 +226,94 @@ pid_t sys_exec(const char *cmdline) {
   return child_tid;
 }
 
-int sys_wait(pid_t pid) {
+int sys_wait(pid_t pid) 
+{
   _DEBUG_PRINTF ("[DEBUG] Wait : %d\n", pid);
   return process_wait(pid);
+}
+
+bool sys_create(const char* filename, unsigned initial_size) 
+{
+  bool return_code;
+  // memory validation
+  if (get_user((const uint8_t*) filename) == -1) {
+    return fail_invalid_access();
+  }
+  return_code = filesys_create(filename, initial_size);
+  return return_code;
+}
+
+bool sys_remove(const char* filename) 
+{
+  bool return_code;
+  // memory validation
+  if (get_user((const uint8_t*) filename) == -1) {
+    return fail_invalid_access();
+  }
+
+  return_code = filesys_remove(filename);
+  return return_code;
+}
+
+int sys_open(const char* file) {
+  struct file* file_opened;
+  struct file_desc* fd = palloc_get_page(0);
+
+  // memory validation
+  if (get_user((const uint8_t*) file) == -1) {
+    return fail_invalid_access();
+  }
+
+  file_opened = filesys_open(file);
+  if (!file_opened) {
+    return -1;
+  }
+
+  fd->file = file_opened;
+
+  struct list* fd_list = &thread_current ()->file_descriptors;
+  if (list_empty(fd_list)) {
+    // 0, 1, 2 are reserved for stdin, stdout, stderr
+    fd->id = 3;
+  }
+  else {
+    fd->id = (list_entry(list_back(fd_list), struct file_desc, elem)->id) + 1;
+  }
+  list_push_back(fd_list, &(fd->elem));
+
+  return fd->id;
+}
+
+int sys_filesize(int fd) {
+  struct file_desc* file_d;
+
+  // memory validation
+  if (get_user((const uint8_t*) fd) == -1) {
+    fail_invalid_access();
+  }
+
+  file_d = find_file_desc(fd);
+
+  if(file_d == NULL) {
+    return -1;
+  }
+
+  return file_length(file_d->file);
+}
+
+void sys_close(int fd) {
+  struct file_desc* file_d = find_file_desc (fd);
+
+  // memory validation
+  if (get_user((const uint8_t*) fd) == -1) {
+     fail_invalid_access();
+  }
+
+  if(file_d && file_d->file) {
+    file_close(file_d->file);
+    list_remove(&(file_d->elem));
+    palloc_free_page(file_d);
+  }
 }
 
 /****************** Helper Functions on Memory Access ********************/
@@ -208,4 +346,25 @@ memread_user (void *src, void *dst, size_t bytes)
     *(char*)(dst + i) = value & 0xff;
   }
   return (int)bytes;
+}
+
+static struct file_desc*
+find_file_desc(int fd)
+{
+  struct thread* curr = thread_current();
+  struct file* output_file;
+  int i;
+  struct list_elem *e = list_begin(&curr->file_descriptors ) ;
+  if (fd < 3) {
+    return NULL;
+  }
+
+  for(i = 3; i < fd; i++){
+    if (e == NULL)
+      return NULL;
+    e = list_next(e);
+  }
+
+  struct file_desc *file_des = list_entry(e, struct file_desc, elem);
+  return file_des;
 }
