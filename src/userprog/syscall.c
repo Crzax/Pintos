@@ -232,7 +232,6 @@ void sys_exit(int status UNUSED) {
   if(pcb != NULL) {
     pcb->exited = true;
     pcb->exitcode = status;
-    sema_up (&pcb->sema_wait);
   }
   else {
     // pcb == NULL probably means that previously
