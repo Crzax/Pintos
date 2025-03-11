@@ -285,9 +285,13 @@ int sys_open(const char* file) {
   struct file* file_opened;
   struct file_desc* fd = palloc_get_page(0);
 
+  if (!fd) {
+    return -1;
+  }
 
   file_opened = filesys_open(file);
   if (!file_opened) {
+    palloc_free_page (fd);
     return -1;
   }
 
