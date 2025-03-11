@@ -174,7 +174,7 @@ syscall_handler (struct intr_frame *f UNUSED)
 unhandled:
     default:
       printf("[ERROR] system call %d is unimplemented!\n", syscall_number);
-      thread_exit();
+      sys_exit(-1);
       break;
     }
 }
@@ -187,8 +187,15 @@ void sys_halt(void) {
 void sys_exit(int status UNUSED) {
   printf("%s: exit(%d)\n", thread_current()->name, status);
 
-  /* TODO set return code : status
-    PASS status into kernel. */ 
+  // The process exits.
+  // wake up the parent process (if it was sleeping) using semaphore,
+  // and pass the return code.
+  struct process_control_block *pcb = thread_current()->pcb;
+  ASSERT (pcb != NULL);
+
+  pcb->exited = true;
+  pcb->exitcode = status;
+  sema_up (&pcb->sema_wait);
   thread_exit();
 }
 
