@@ -22,12 +22,11 @@ static void syscall_handler (struct intr_frame *);
 /** Helper Functions.*/
 static int32_t get_user (const uint8_t *uaddr);
 static int memread_user (void *src, void *des, size_t bytes);
-static struct file_desc* find_file_desc(int fd);
+static struct file_desc* find_file_desc(struct thread *, int fd);
 
 /** Syscall Functions definition. */
 void sys_halt (void);
 void sys_exit (int);
-bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 pid_t sys_exec (const char *cmdline);
 int sys_wait (pid_t pid);
 bool sys_create (const char* filename, unsigned initial_size);
@@ -35,6 +34,8 @@ bool sys_remove (const char* filename);
 int sys_open (const char* file);
 void sys_close (int fd);
 int sys_filesize (int fd);
+int sys_read(int fd, void *buffer, unsigned size);
+int sys_write(int fd, const void *buffer, unsigned size);
 
 struct lock filesys_lock;
 
@@ -120,7 +121,16 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
       }
     case SYS_REMOVE:
-      goto unhandled;
+      {
+        const char* filename;
+        bool return_code;
+        if (memread_user(f->esp + 4, &filename, sizeof(filename)) == -1)
+          fail_invalid_access(); // invalid memory access
+
+        return_code = sys_remove(filename);
+        f->eax = return_code;
+        break;
+      }
     case SYS_OPEN:
       {
         const char* filename;
@@ -143,7 +153,19 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
       }
     case SYS_READ:
-      goto unhandled;
+      {
+        int fd, return_code;
+        void *buffer;
+        unsigned size;
+
+        if(-1 == memread_user(f->esp + 4, &fd, 4)) fail_invalid_access();
+        if(-1 == memread_user(f->esp + 8, &buffer, 4)) fail_invalid_access();
+        if(-1 == memread_user(f->esp + 12, &size, 4)) fail_invalid_access();
+
+        return_code = sys_read(fd, buffer, size);
+        f->eax = (uint32_t) return_code;
+        break;
+      }
     case SYS_WRITE:
     {
       int fd, return_code;
@@ -155,9 +177,7 @@ syscall_handler (struct intr_frame *f UNUSED)
       if(-1 == memread_user(f->esp + 8, &buffer, 4)) fail_invalid_access();
       if(-1 == memread_user(f->esp + 12, &size, 4)) fail_invalid_access();
 
-      if(!sys_write(fd, buffer, size, &return_code)) fail_invalid_access();
-        return_code = 0;
-      
+      return_code = sys_write(fd, buffer, size);
       f->eax = (uint32_t) return_code;
       break;
     }
@@ -200,26 +220,6 @@ void sys_exit(int status UNUSED) {
   pcb->exitcode = status;
   sema_up (&pcb->sema_wait);
   thread_exit();
-}
-
-bool sys_write(int fd, const void *buffer, unsigned size, int* ret) {
-  /* memory validation */
-  if (get_user((const uint8_t*) buffer) == -1) {
-    /* invalid */
-    fail_invalid_access();
-  }
-
-  /* First, as of now, only implement fd=1 (stdout)
-   in order to display the messages from the test sets correctly. */
-   if(fd == 1) {
-    putbuf(buffer, size);
-    *ret = size;
-    return true;
-  }
-  else {
-    printf("[ERROR] sys_write unimplemented\n");
-  }
-  return false;
 }
 
 pid_t sys_exec(const char *cmdline) {
@@ -296,12 +296,7 @@ int sys_open(const char* file) {
 int sys_filesize(int fd) {
   struct file_desc* file_d;
 
-  // memory validation
-  if (get_user((const uint8_t*) fd) == -1) {
-    fail_invalid_access();
-  }
-
-  file_d = find_file_desc(fd);
+  file_d = find_file_desc(thread_current(), fd);
 
   if(file_d == NULL) {
     return -1;
@@ -311,17 +306,59 @@ int sys_filesize(int fd) {
 }
 
 void sys_close(int fd) {
-  struct file_desc* file_d = find_file_desc (fd);
-
-  // memory validation
-  if (get_user((const uint8_t*) fd) == -1) {
-     fail_invalid_access();
-  }
+  struct file_desc* file_d = find_file_desc(thread_current(), fd);
 
   if(file_d && file_d->file) {
     file_close(file_d->file);
     list_remove(&(file_d->elem));
     palloc_free_page(file_d);
+  }
+}
+
+int sys_read(int fd, void *buffer, unsigned size) {
+  // memory validation
+  if (get_user((const uint8_t*) buffer) == -1) {
+    fail_invalid_access();
+  }
+
+  if(fd == 0) { // stdin
+    unsigned i;
+    for(i = 0; i < size; ++i) {
+      ((uint8_t *)buffer)[i] = input_getc();
+    }
+    return size;
+  }
+  else {
+    // read from file
+    struct file_desc* file_d = find_file_desc(thread_current(), fd);
+
+    if(file_d && file_d->file) {
+      return file_read(file_d->file, buffer, size);
+    }
+    else // no such file or can't open
+      return -1;
+  }
+}
+
+int sys_write(int fd, const void *buffer, unsigned size) {
+  // memory validation
+  if (get_user((const uint8_t*) buffer) == -1) {
+    fail_invalid_access();
+  }
+
+  if(fd == 1) { // write to stdout
+    putbuf(buffer, size);
+    return size;
+  }
+  else {
+    // write into file
+    struct file_desc* file_d = find_file_desc(thread_current(), fd);
+
+    if(file_d && file_d->file) {
+      return file_write(file_d->file, buffer, size);
+    }
+    else // no such file or can't open
+      return -1;
   }
 }
 
@@ -358,22 +395,26 @@ memread_user (void *src, void *dst, size_t bytes)
 }
 
 static struct file_desc*
-find_file_desc(int fd)
+find_file_desc(struct thread *t, int fd)
 {
-  struct thread* curr = thread_current();
+  ASSERT (t != NULL);
+
   if (fd < 3) {
     return NULL;
   }
-  
-  int i;
-  struct list_elem *e = list_begin(&curr->file_descriptors ) ;
 
-  for(i = 3; i < fd; i++){
-    if (e == NULL)
-      return NULL;
-    e = list_next(e);
+  struct list_elem *e;
+
+  if (! list_empty(&t->file_descriptors)) {
+    for(e = list_begin(&t->file_descriptors);
+        e != list_end(&t->file_descriptors); e = list_next(e))
+    {
+      struct file_desc *desc = list_entry(e, struct file_desc, elem);
+      if(desc->id == fd) {
+        return desc;
+      }
+    }
   }
 
-  struct file_desc *file_des = list_entry(e, struct file_desc, elem);
-  return file_des;
+  return NULL; // not found
 }
