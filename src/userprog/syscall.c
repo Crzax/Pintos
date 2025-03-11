@@ -27,6 +27,7 @@ static int32_t get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
 static int memread_user (void *src, void *des, size_t bytes);
 static struct file_desc* find_file_desc(struct thread *, int fd);
+static bool validate_user_string(const char *uaddr);
 
 /** Syscall Functions definition. */
 void sys_halt (void);
@@ -240,12 +241,19 @@ void sys_exit(int status UNUSED) {
   thread_exit();
 }
 
-pid_t sys_exec(const char *cmdline) {
-  _DEBUG_PRINTF ("[DEBUG] Exec : %s\n", cmdline);
 
-  /* cmdline is an address to the character buffer, on user memory
-    so a validation check is required. */
-  check_user((const uint8_t*) cmdline);
+
+/* 修改后的 sys_exec */
+pid_t sys_exec(const char *cmdline) {
+  _DEBUG_PRINTF("[DEBUG] Exec : %s\n", cmdline);
+
+  /* cmdline 是用户内存中的地址，需要验证 */
+  check_user((const uint8_t*)cmdline);
+
+  /* 验证整个命令行字符串 */
+  if (!validate_user_string(cmdline)) {
+    fail_invalid_access();  // 无效内存访问，终止进程
+  }
 
   pid_t pid = process_execute(cmdline);
   return pid;
@@ -481,4 +489,20 @@ find_file_desc(struct thread *t, int fd)
   }
 
   return NULL; // not found
+}
+
+/* 验证整个用户字符串是否在有效内存中 */
+static bool
+validate_user_string(const char *uaddr) {
+  const char *p = uaddr;
+  while (true) {
+    int c = get_user((const uint8_t *)p);
+    if (c == -1) {  // 无效内存访问
+      return false;
+    }
+    if (c == 0) {  // 到达字符串结束
+      return true;
+    }
+    p++;
+  }
 }
