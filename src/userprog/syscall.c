@@ -23,6 +23,7 @@ void sys_halt (void);
 void sys_exit (int);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 pid_t sys_exec (const char *cmdline);
+int sys_wait(pid_t pid);
 
 void
 syscall_init (void) 
@@ -82,6 +83,15 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
       }
     case SYS_WAIT:
+      {
+        pid_t pid;
+        if (memread_user(f->esp + 4, &pid, sizeof(pid_t)) == -1)
+          fail_invalid_access();
+
+        int ret = sys_wait(pid);
+        f->eax = (uint32_t) ret;
+        break;
+      }
     case SYS_CREATE:
     case SYS_REMOVE:
     case SYS_OPEN:
@@ -156,14 +166,16 @@ pid_t sys_exec(const char *cmdline) {
 
   /* cmdline is an address to the character buffer, on user memory
     so a validation check is required. */
-  if (get_user((const uint8_t*) cmdline) == -1) {
-    /* invalid memory access */
-    thread_exit();
-    return -1;
-  }
+  if (get_user((const uint8_t*) cmdline) == -1) 
+    fail_invalid_access();
 
   tid_t child_tid = process_execute(cmdline);
   return child_tid;
+}
+
+int sys_wait(pid_t pid) {
+  _DEBUG_PRINTF ("[DEBUG] Wait : %d\n", pid);
+  return process_wait(pid);
 }
 
 /****************** Helper Functions on Memory Access ********************/
