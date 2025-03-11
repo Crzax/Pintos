@@ -29,12 +29,12 @@ void sys_halt (void);
 void sys_exit (int);
 bool sys_write(int fd, const void *buffer, unsigned size, int* ret);
 pid_t sys_exec (const char *cmdline);
-int sys_wait(pid_t pid);
-bool sys_create(const char* filename, unsigned initial_size);
-bool sys_remove(const char* filename);
-int sys_open(const char* file);
-void sys_close(int fd);
-int sys_filesize(int fd);
+int sys_wait (pid_t pid);
+bool sys_create (const char* filename, unsigned initial_size);
+bool sys_remove (const char* filename);
+int sys_open (const char* file);
+void sys_close (int fd);
+int sys_filesize (int fd);
 
 struct lock filesys_lock;
 
@@ -61,7 +61,7 @@ syscall_handler (struct intr_frame *f UNUSED)
     thread_exit (); // invalid memory access, terminate the user process
     return;
   }
-  
+
   _DEBUG_PRINTF ("[DEBUG] system call, number = %d!\n", syscall_number);
 
   /* Dispatch w.r.t system call number
@@ -120,6 +120,7 @@ syscall_handler (struct intr_frame *f UNUSED)
         break;
       }
     case SYS_REMOVE:
+      goto unhandled;
     case SYS_OPEN:
       {
         const char* filename;
@@ -155,6 +156,8 @@ syscall_handler (struct intr_frame *f UNUSED)
       if(-1 == memread_user(f->esp + 12, &size, 4)) fail_invalid_access();
 
       if(!sys_write(fd, buffer, size, &return_code)) fail_invalid_access();
+        return_code = 0;
+      
       f->eax = (uint32_t) return_code;
       break;
     }
@@ -179,7 +182,7 @@ unhandled:
     }
 }
 
-/** Syscall Funcitons. */
+/****************** System Call Implementations ********************/
 void sys_halt(void) {
   shutdown_power_off();
 }
@@ -203,8 +206,7 @@ bool sys_write(int fd, const void *buffer, unsigned size, int* ret) {
   /* memory validation */
   if (get_user((const uint8_t*) buffer) == -1) {
     /* invalid */
-    thread_exit();
-    return false;
+    fail_invalid_access();
   }
 
   /* First, as of now, only implement fd=1 (stdout)
@@ -244,7 +246,7 @@ bool sys_create(const char* filename, unsigned initial_size)
   bool return_code;
   // memory validation
   if (get_user((const uint8_t*) filename) == -1) {
-    return fail_invalid_access();
+    fail_invalid_access();
   }
   return_code = filesys_create(filename, initial_size);
   return return_code;
@@ -255,7 +257,7 @@ bool sys_remove(const char* filename)
   bool return_code;
   // memory validation
   if (get_user((const uint8_t*) filename) == -1) {
-    return fail_invalid_access();
+   fail_invalid_access();
   }
 
   return_code = filesys_remove(filename);
@@ -268,7 +270,7 @@ int sys_open(const char* file) {
 
   // memory validation
   if (get_user((const uint8_t*) file) == -1) {
-    return fail_invalid_access();
+    fail_invalid_access();
   }
 
   file_opened = filesys_open(file);
@@ -359,12 +361,12 @@ static struct file_desc*
 find_file_desc(int fd)
 {
   struct thread* curr = thread_current();
-  struct file* output_file;
-  int i;
-  struct list_elem *e = list_begin(&curr->file_descriptors ) ;
   if (fd < 3) {
     return NULL;
   }
+  
+  int i;
+  struct list_elem *e = list_begin(&curr->file_descriptors ) ;
 
   for(i = 3; i < fd; i++){
     if (e == NULL)
