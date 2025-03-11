@@ -229,11 +229,15 @@ void sys_exit(int status UNUSED) {
   // wake up the parent process (if it was sleeping) using semaphore,
   // and pass the return code.
   struct process_control_block *pcb = thread_current()->pcb;
-  ASSERT (pcb != NULL);
-
-  pcb->exited = true;
-  pcb->exitcode = status;
-  sema_up (&pcb->sema_wait);
+  if(pcb != NULL) {
+    pcb->exited = true;
+    pcb->exitcode = status;
+    sema_up (&pcb->sema_wait);
+  }
+  else {
+    // pcb == NULL probably means that previously
+    //
+  }
   thread_exit();
 }
 
