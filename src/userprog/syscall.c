@@ -4,6 +4,7 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/process.h"
 
 #ifdef DEBUG
 #define _DEBUG_PRINTF(...) printf(__VA_ARGS__)
@@ -12,8 +13,6 @@
 #endif
 
 static void syscall_handler (struct intr_frame *);
-
-typedef int pid_t;
 
 /** Helper Functions.*/
 static int32_t get_user (const uint8_t *uaddr);

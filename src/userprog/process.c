@@ -44,10 +44,18 @@ process_execute (const char *file_name)
   char *save_ptr;
   char *proc_name = strtok_r(cmd_all_1, " ", &save_ptr);
   
-  /* Create a new thread to execute PROC_CMD. */
-  tid = thread_create (proc_name, PRI_DEFAULT, start_process, cmd_all_2);
+  // Create a PCB, along with file_name, and pass it into thread_create
+  // so that a newly created thread can hold the PCB of process to be executed.
+  struct process_control_block *pcb = palloc_get_page(0);
+  pcb->pid = PID_INITIALIZING;
+  pcb->cmdline = cmd_all_2;
 
-  if (tid == TID_ERROR) {
+  /* Create a new thread to execute PROC_CMD. */
+  tid = thread_create (proc_name, PRI_DEFAULT, start_process, pcb);
+
+  if (tid == TID_ERROR) 
+  {
+    palloc_free_page (pcb);
     palloc_free_page(cmd_all_1);
     palloc_free_page(cmd_all_2);
   }
@@ -78,9 +86,11 @@ push_argument (void **esp, int argc, int argv[])
 /** A thread function that loads a user process and starts it
    running. */
 static void
-start_process (void *file_name_)
+start_process (void *pcb_)
 {
-  char *file_name = file_name_;
+  struct process_control_block *pcb = pcb_;
+
+  char *file_name = (char*) pcb->cmdline;
   struct intr_frame if_;
   bool success;
 
@@ -146,10 +156,12 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+#ifndef DEBUG
   //TODO Infinite loop(temporally).
   int i = 0;
   for (i = 0; i < INT32_MAX;) ++i;
-   
+#endif
+
   return -1;
 }
 
