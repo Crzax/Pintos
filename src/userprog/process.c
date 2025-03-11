@@ -275,11 +275,13 @@ process_exit (void)
     palloc_free_page (pcb); // pcb can freed when it is removed from the list
   }
 
-  /* Release file for the executable */
-  if(cur->executing_file) {
-    file_allow_write(cur->executing_file);
-    file_close(cur->executing_file);
-  }
+   /* 释放可执行文件 */
+   if (cur->executing_file) 
+   {
+     file_allow_write(cur->executing_file);
+     file_close(cur->executing_file);
+     cur->executing_file = NULL;
+   }
 
   // Unblock the waiting parent process, if any, from wait().
   // now its resource (pcb on page, etc.) can be freed.
@@ -497,9 +499,18 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
   success = true;
 
+  if (success) 
+  {
+    struct thread *t = thread_current();
+    t->executing_file = file;  // 保存文件指针
+    file_deny_write(t->executing_file);  // 禁止写入
+  }
+
  done:
   /* We arrive here whether the load is successful or not. */
-  file_close (file);
+   /* 仅在加载失败时关闭文件 */
+   if (!success && file != NULL)
+    file_close(file);
   return success;
 }
 
