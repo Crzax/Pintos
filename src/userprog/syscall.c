@@ -1,3 +1,5 @@
+#include "devices/shutdown.h"
+#include "devices/input.h"
 #include "userprog/syscall.h"
 #include <stdio.h>
 #include <syscall-nr.h>
