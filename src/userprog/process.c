@@ -20,6 +20,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
+void push_argument (void **esp, int argc, int argv[]);
 
 /** Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -28,21 +29,50 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  char *cmd_all_1, *cmd_all_2;
   tid_t tid;
 
-  /* Make a copy of FILE_NAME.
+  /* Make two copies of PROC_CMD (one for proc_name and one for start_process).
      Otherwise there's a race between the caller and load(). */
-  fn_copy = palloc_get_page (0);
-  if (fn_copy == NULL)
-    return TID_ERROR;
-  strlcpy (fn_copy, file_name, PGSIZE);
+  cmd_all_1 = palloc_get_page(0);
+  cmd_all_2 = palloc_get_page(0);
+  if (cmd_all_1 == NULL || cmd_all_2 == NULL)
+    return TID_ERROR; 
+  strlcpy (cmd_all_1, file_name, PGSIZE);
+  strlcpy (cmd_all_2, file_name, PGSIZE);
 
-  /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  if (tid == TID_ERROR)
-    palloc_free_page (fn_copy); 
+  char *save_ptr;
+  char *proc_name = strtok_r(cmd_all_1, " ", &save_ptr);
+  
+  /* Create a new thread to execute PROC_CMD. */
+  tid = thread_create (proc_name, PRI_DEFAULT, start_process, cmd_all_2);
+
+  if (tid == TID_ERROR) {
+    palloc_free_page(cmd_all_1);
+    palloc_free_page(cmd_all_2);
+  }
   return tid;
+}
+
+/** For Task 1:
+  Push argument into stack, this method is used in Task 1 Argument Pushing */
+void
+push_argument (void **esp, int argc, int argv[])
+{
+  *esp = (int)*esp & 0xfffffffc;
+  *esp -= 4;
+  *(int *) *esp = 0;
+  for (int i = argc - 1; i >= 0; i--)
+  {
+    *esp -= 4;
+    *(int *) *esp = argv[i];
+  }
+  *esp -= 4;
+  *(int *) *esp = (int) *esp + 4;
+  *esp -= 4;
+  *(int *) *esp = argc;
+  *esp -= 4;
+  *(int *) *esp = 0;
 }
 
 /** A thread function that loads a user process and starts it
@@ -54,12 +84,37 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+  char *fn_copy = palloc_get_page (0);
+  strlcpy(fn_copy, file_name, PGSIZE);
+  
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
+
+  char *token, *save_ptr;
+  file_name = strtok_r (file_name, " ", &save_ptr);
   success = load (file_name, &if_.eip, &if_.esp);
+
+  if (success)
+    {
+      /* For Task 1:
+        Calculate the number of parameters and the specification of parameters */
+      int argc = 0;
+      /* The number of parameters can't be more than 80 in the test case */
+      int argv[80];
+      for (token = strtok_r (fn_copy, " ", &save_ptr); token != NULL; token = strtok_r (NULL, " ", &save_ptr)){
+        size_t arg_len = strlen (token) + 1;
+        if_.esp -= arg_len;
+        memcpy (if_.esp, token, arg_len);
+        argv[argc++] = (int) if_.esp;
+      }
+      push_argument (&if_.esp, argc, argv);
+      /* For debug. */
+      hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
+    }
+  palloc_free_page(fn_copy);
 
   /* If load failed, quit. */
   palloc_free_page (file_name);
@@ -88,6 +143,10 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  //TODO Infinite loop(temporally).
+  int i = 0;
+  for (i = 0; i < INT32_MAX;) ++i;
+   
   return -1;
 }
 
