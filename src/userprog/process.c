@@ -111,8 +111,6 @@ start_process (void *file_name_)
         argv[argc++] = (int) if_.esp;
       }
       push_argument (&if_.esp, argc, argv);
-      /* For debug. */
-      hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
     }
   palloc_free_page(fn_copy);
 
