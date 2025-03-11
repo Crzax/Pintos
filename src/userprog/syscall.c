@@ -359,7 +359,8 @@ int sys_read(int fd, void *buffer, unsigned size) {
   if(fd == 0) { // stdin
     unsigned i;
     for(i = 0; i < size; ++i) {
-      put_user(buffer + i, input_getc());
+      if(!put_user(buffer + i, input_getc()) )
+        sys_exit(-1); // segfault
     }
     return size;
   }
