@@ -27,7 +27,7 @@
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-void push_argument (void **esp, int argc, int argv[]);
+static void push_arguments (const char *[], int argc, void **esp);
 
 /** Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -37,7 +37,6 @@ pid_t process_execute(const char *file_name)
 {
   char *cmd_all_1 = NULL, *cmd_all_2 = NULL;
   char *save_ptr = NULL;
-  char *proc_name = NULL;
   struct process_control_block *pcb = NULL;
   tid_t tid;
 
@@ -45,16 +44,17 @@ pid_t process_execute(const char *file_name)
   cmd_all_1 = palloc_get_page(0);
   if (cmd_all_1 == NULL)
     return TID_ERROR;
+  strlcpy(cmd_all_1, file_name, PGSIZE);
+  
   cmd_all_2 = palloc_get_page(0);
   if (cmd_all_2 == NULL) {
     palloc_free_page(cmd_all_1);
     return TID_ERROR;
   }
     
-  strlcpy(cmd_all_1, file_name, PGSIZE);
-  strlcpy(cmd_all_2, file_name, PGSIZE);
+   strlcpy(cmd_all_2, file_name, PGSIZE);
   
-  proc_name = strtok_r(cmd_all_1, " ", &save_ptr);
+  cmd_all_1 = strtok_r(cmd_all_1, " ", &save_ptr);
   
   /* Create a PCB, along with file_name, and pass it into thread_create. */
   pcb = palloc_get_page(0);
@@ -68,13 +68,14 @@ pid_t process_execute(const char *file_name)
   pcb->cmdline = cmd_all_2;
   pcb->waiting = false;
   pcb->exited = false;
+  pcb->orphan = false;
   pcb->exitcode = -1; // undefined
 
   sema_init(&pcb->sema_initialization, 0);
   sema_init(&pcb->sema_wait, 0);
 
   /* Create a new thread to execute PROC_CMD. */
-  tid = thread_create(proc_name, PRI_DEFAULT, start_process, pcb);
+  tid = thread_create(cmd_all_1, PRI_DEFAULT, start_process, pcb);
 
   if (tid == TID_ERROR) {
     palloc_free_page(pcb);
@@ -85,10 +86,14 @@ pid_t process_execute(const char *file_name)
 
   /* Wait until initialization inside start_process() is complete. */
   sema_down(&pcb->sema_initialization);
+  if(cmd_all_2) {
+    palloc_free_page (cmd_all_2);
+  }
 
   /* Process successfully created, maintain child process list. */
-  list_push_back(&(thread_current()->child_list), &(pcb->elem));
-  
+  if(pcb->pid >= 0) {
+    list_push_back (&(thread_current()->child_list), &(pcb->elem));
+  }  
   /* Free cmd_all_1 since it's no longer needed. */
   palloc_free_page(cmd_all_1);
   
@@ -97,89 +102,106 @@ pid_t process_execute(const char *file_name)
 
 /** For Task 1:
   Push argument into stack, this method is used in Task 1 Argument Pushing */
-void
-push_argument (void **esp, int argc, int argv[])
-{
-  *esp = (int)*esp & 0xfffffffc;
-  *esp -= 4;
-  *(int *) *esp = 0;
-  for (int i = argc - 1; i >= 0; i--)
+  static void
+  push_arguments (const char* cmdline_tokens[], int argc, void **esp)
   {
+    ASSERT(argc >= 0);
+  
+    int i, len = 0;
+    void* argv_addr[argc];
+    for (i = 0; i < argc; i++) {
+      len = strlen(cmdline_tokens[i]) + 1;
+      *esp -= len;
+      memcpy(*esp, cmdline_tokens[i], len);
+      argv_addr[i] = *esp;
+    }
+  
+    // word align
+    *esp = (void*)((unsigned int)(*esp) & 0xfffffffc);
+  
+    // last null
     *esp -= 4;
-    *(int *) *esp = argv[i];
+    *((uint32_t*) *esp) = 0;
+  
+    // setting **esp with argvs
+    for (i = argc - 1; i >= 0; i--) {
+      *esp -= 4;
+      *((void**) *esp) = argv_addr[i];
+    }
+  
+    // setting **argv (addr of stack, esp)
+    *esp -= 4;
+    *((void**) *esp) = (*esp + 4);
+  
+    // setting argc
+    *esp -= 4;
+    *((int*) *esp) = argc;
+  
+    // setting ret addr
+    *esp -= 4;
+    *((int*) *esp) = 0;
+  
   }
-  *esp -= 4;
-  *(int *) *esp = (int) *esp + 4;
-  *esp -= 4;
-  *(int *) *esp = argc;
-  *esp -= 4;
-  *(int *) *esp = 0;
-}
 
 /** A thread function that loads a user process and starts it running. */
 static void
 start_process(void *pcb_)
 {
+  struct thread *t = thread_current();
   struct process_control_block *pcb = pcb_;
 
-  char *file_name = (char *)pcb->cmdline;
-  struct intr_frame if_;
-  bool success;
+  char *file_name = (char*) pcb->cmdline;
+  bool success = false;
 
-  char *fn_copy = palloc_get_page(0);
-  if (fn_copy == NULL) {
-    pcb->pid = PID_ERROR;
-    sema_up(&pcb->sema_initialization);
-    thread_exit();
+  // cmdline handling
+  const char **cmdline_tokens = (const char**) palloc_get_page(0);
+  if (cmdline_tokens == NULL) {
+    printf("[Error] Kernel Error: Not enough memory\n");
+    pcb->pid = PID_ERROR;  // Set pid to error
+    t->pcb = pcb;          // Assign PCB to thread
+    sema_up(&pcb->sema_initialization);  // Wake up process_execute()
+    sys_exit(-1);          // Exit with failure
   }
-  strlcpy(fn_copy, file_name, PGSIZE);
-  
-  /* Initialize interrupt frame and load executable. */
+
+  // Tokenize the command line
+  char *token;
+  char *save_ptr;
+  int cnt = 0;
+  for (token = strtok_r(file_name, " ", &save_ptr); token != NULL;
+       token = strtok_r(NULL, " ", &save_ptr)) {
+    cmdline_tokens[cnt++] = token;
+  }
+
+  // Initialize interrupt frame and load executable
+  struct intr_frame if_;
   memset(&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-
-  char *token, *save_ptr;
-  file_name = strtok_r(file_name, " ", &save_ptr);
   success = load(file_name, &if_.eip, &if_.esp);
 
+  // If load succeeds, push arguments to the stack
   if (success) {
-    /* For Task 1: Calculate the number of parameters and the specification of parameters */
-    int argc = 0;
-    /* The number of parameters can't be more than 80 in the test case */
-    int argv[80];
-    for (token = strtok_r(fn_copy, " ", &save_ptr); token != NULL; token = strtok_r(NULL, " ", &save_ptr)) {
-      size_t arg_len = strlen(token) + 1;
-      if_.esp -= arg_len;
-      memcpy(if_.esp, token, arg_len);
-      argv[argc++] = (int)if_.esp;
-    }
-    push_argument(&if_.esp, argc, argv);
-
-    /* DEBUG */
-#ifdef DEBUG
-    hex_dump(if_.esp, if_.esp, PHYS_BASE - if_.esp, true);
-#endif
+    push_arguments(cmdline_tokens, cnt, &if_.esp);
   }
 
-  /* Assign PCB */
-  struct thread *t = thread_current();
-  // We maintain a one-to-one mapping between pid and tid, with identity function.
+  // Free the allocated page for cmdline_tokens
+  palloc_free_page(cmdline_tokens);
+
+  // Assign PCB
   pcb->pid = success ? (pid_t)(t->tid) : PID_ERROR;
   t->pcb = pcb;
 
-  // Wake up the parent sleeping in process_execute()
+  // Wake up sleeping process_execute()
   sema_up(&pcb->sema_initialization);
 
-  palloc_free_page(fn_copy);
+  // If load failed, exit
+  if (!success) {
+    sys_exit(-1);
+  }
 
-  /* If load failed, quit. */
-  if (!success)
-    sys_exit (-1);
-
-  /* Start the user process by simulating a return from an interrupt. */
-  asm volatile("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  // Start the user process by simulating a return from an interrupt
+  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED();
 }
 
@@ -229,8 +251,8 @@ process_wait (tid_t child_tid UNUSED)
     child_pcb->waiting = true;
   }
 
-  // block until child terminates, and return the exitcode
-  // TODO: scenario of zombie process is tricky!
+  // wait(block) until child terminates
+  // see process_exit() for signaling this semaphore
   if (! child_pcb->exited) {
     sema_down(& (child_pcb->sema_wait));
   }
@@ -239,6 +261,7 @@ process_wait (tid_t child_tid UNUSED)
   // remove from child_list
   ASSERT (it != NULL);
   list_remove (it);
+
   // return the exit code of the child process
   int retcode = child_pcb->exitcode;
 
@@ -272,25 +295,37 @@ process_exit (void)
     struct list_elem *e = list_pop_front (child_list);
     struct process_control_block *pcb;
     pcb = list_entry(e, struct process_control_block, elem);
-    palloc_free_page (pcb); // pcb can freed when it is removed from the list
+    if (pcb->exited == true) {
+      // pcb can freed when it is already terminated
+      palloc_free_page (pcb);
+    } else {
+      // the child process becomes an orphan.
+      // do not free pcb yet, postpone until the child terminates
+      pcb->orphan = true;
+    }
   }
 
-   /* 释放可执行文件 */
-   if (cur->executing_file) 
-   {
-     file_allow_write(cur->executing_file);
-     file_close(cur->executing_file);
-     cur->executing_file = NULL;
-   }
+  /* Release file for the executable */
+  if(cur->executing_file) {
+    file_allow_write(cur->executing_file);
+    file_close(cur->executing_file);
+  }
 
   // Unblock the waiting parent process, if any, from wait().
   // now its resource (pcb on page, etc.) can be freed.
+  bool cur_pcb_orphan = cur->pcb->orphan;
   sema_up (&cur->pcb->sema_wait);
+
+  // Destroy the pcb object by itself, if it is orphan.
+  // see (part 2) of above.
+  if (cur_pcb_orphan) {
+    palloc_free_page (& cur->pcb);
+  }
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;
-  if (pd != NULL) 
+  if (pd != NULL)
     {
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
@@ -497,20 +532,16 @@ load (const char *file_name, void (**eip) (void), void **esp)
   /* Start address. */
   *eip = (void (*) (void)) ehdr.e_entry;
 
+  /* Deny writes to executables. */
+  file_deny_write (file);
+  thread_current()->executing_file = file;
+
   success = true;
 
-  if (success) 
-  {
-    struct thread *t = thread_current();
-    t->executing_file = file;  // 保存文件指针
-    file_deny_write(t->executing_file);  // 禁止写入
-  }
-
- done:
+done:
   /* We arrive here whether the load is successful or not. */
-   /* 仅在加载失败时关闭文件 */
-   if (!success && file != NULL)
-    file_close(file);
+
+  // do not close file here, postpone until it terminates
   return success;
 }
 
