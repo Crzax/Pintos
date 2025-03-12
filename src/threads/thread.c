@@ -298,14 +298,15 @@ thread_exit (void)
 #ifdef USERPROG
   process_exit ();
 #endif
-struct thread *curr = thread_current();
+  struct thread *curr = thread_current();
 
-// release all locks
-struct list_elem *e;
-for (e = list_begin (&curr->locks_holding); e != list_end (&curr->locks_holding); e = list_next (e)) {
-  struct lock *lock = list_entry(e, struct lock, elem);
-  lock_release(lock);
-}
+  /* release all locks */
+  struct list_elem *e;
+  for (e = list_begin (&curr->locks_holding); e != list_end (&curr->locks_holding); e = list_next (e)) {
+    struct lock *lock = list_entry(e, struct lock, elem);
+    lock_release(lock);
+  }
+  
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
