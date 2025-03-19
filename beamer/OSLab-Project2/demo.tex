@@ -34,7 +34,8 @@
     stringstyle=\color{deepgreen},
     numbers=left,
     numberstyle=\tiny\color{halfgray},
-    showspaces=false 
+    showspaces=false,
+    commentstyle=\color{halfgray}
 }
 
 \titlegraphic{\hfill\includegraphics[height=2cm]{figures/whulogo.pdf}}
@@ -373,7 +374,7 @@ System call numbers for each system call are defined in lib/syscall-nr.h
     \begin{lstlisting}[language=C]
 // thread.h
 struct thread {
-        struct process_control_block *pcb;  /**<  Process Control Block */
+    struct process_control_block *pcb;  /**<  Process Control Block */
     struct list child_list;             /**<  List of children processes of this thread,
                                           each elem is defined by pcb#elem */
     struct list file_descriptors;       /**<  List of file_descriptors the thread contains */
@@ -882,15 +883,17 @@ sys_open(const char* file)
 
   fd->file = file_opened;
 
-  struct list* fd_list = &thread_current ()->file_descriptors;
+  struct list* fd_list = &thread_current ()
+                         ->file_descriptors;
   if (list_empty(fd_list)) 
     {
-      /* 0, 1, 2 are reserved for stdin, stdout, stderr. */
+      /*0, 1, 2 are reserved for stdin, stdout, stderr.*/
       fd->id = 3;
     }
   else 
     {
-      fd->id = (list_entry(list_back(fd_list), struct file_desc, elem)->id) + 1;
+      fd->id = (list_entry(list_back(fd_list), 
+                struct file_desc, elem)->id) + 1;
     }
   list_push_back(fd_list, &(fd->elem));
   lock_release (&filesys_lock);
@@ -1136,7 +1139,8 @@ sys_tell(int fd)
     ret = -1; // TODO need sys_exit?
 
   lock_release (&filesys_lock);
-   return ret;
+  return ret;
+}
     \end{lstlisting}
 \end{frame}
 %---------
