@@ -2,6 +2,7 @@
 #define USERPROG_SYSCALL_H
 
 typedef int pid_t;
+#include "userprog/process.h"
 
 void syscall_init (void);
 
@@ -20,5 +21,8 @@ unsigned sys_tell(int fd);
 void sys_close(int fd);
 int sys_read(int fd, void *buffer, unsigned size);
 int sys_write(int fd, const void *buffer, unsigned size);
-
+#ifdef VM
+/* expose munmap() so that it can be call in sys_exit(); */
+bool sys_munmap (mmapid_t);
+#endif
 #endif /**< userprog/syscall.h */
