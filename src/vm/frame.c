@@ -18,8 +18,13 @@ static struct lock frame_lock;
 static struct hash frame_map;
 
 /* A (circular) list of frames for the clock eviction algorithm. */
-static struct list frame_list;      /* the list */
-static struct list_elem *clock_ptr; /* the pointer in clock algorithm */
+static struct list frame_list;      /**< the list */
+#ifdef LRU
+/* Global counter for LRU */
+static size_t lru_counter;
+#else
+static struct list_elem *clock_ptr; /**< the pointer in clock algorithm */
+#endif
 
 static unsigned frame_hash_func(const struct hash_elem *elem, void *aux);
 static bool     frame_less_func(const struct hash_elem *, const struct hash_elem *, void *aux);
@@ -37,6 +42,9 @@ struct frame_table_entry
 
     bool pinned;               /**< Used to prevent a frame from being evicted, while it is acquiring some resources.
                                   If it is true, it is never evicted. */
+#ifdef LRU
+    size_t last_used;          /**< LRU timestamp */
+#endif
   };
 
 static struct frame_table_entry* pick_frame_to_evict(uint32_t* pagedir);
@@ -49,7 +57,11 @@ vm_frame_init ()
   lock_init (&frame_lock);
   hash_init (&frame_map, frame_hash_func, frame_less_func, NULL);
   list_init (&frame_list);
+#ifdef LRU
+  lru_counter = 0;  /**< Initialize LRU counter. */
+#else
   clock_ptr = NULL;
+#endif
 }
 
 /* Allocate a new frame,
@@ -158,7 +170,44 @@ vm_frame_do_free (void *kpage, bool free_page)
   if(free_page) palloc_free_page(kpage);
   free(f);
 }
+#ifdef LRU
+/* Select the least recently used frame to evict. */
+static struct frame_table_entry*
+pick_frame_to_evict(uint32_t* pagedir)
+{
+  struct list_elem *e;
+  struct frame_table_entry *victim = NULL;
+  size_t min_last_used = (size_t)-1;
 
+  /* Iterate over all frames to find LRU */
+  for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e))
+  {
+      struct frame_table_entry *f = list_entry(e, struct frame_table_entry, lelem);
+      if (f->pinned)
+          continue;
+
+      /* Check and update access bit */
+      bool accessed = pagedir_is_accessed(f->t->pagedir, f->upage) ||
+                      pagedir_is_accessed(f->t->pagedir, f->kpage);
+      if (accessed)
+      {
+          f->last_used = lru_counter++;
+          pagedir_set_accessed(f->t->pagedir, f->upage, false);
+          pagedir_set_accessed(f->t->pagedir, f->kpage, false);
+      }
+
+      /* Track the least recently used */
+      if (f->last_used < min_last_used)
+      {
+          min_last_used = f->last_used;
+          victim = f;
+      }
+  }
+
+  ASSERT(victim != NULL);
+  return victim;
+}
+#else
 /** Frame Eviction Strategy : The Clock Algorithm */
 struct frame_table_entry* clock_frame_next(void);
 struct frame_table_entry* pick_frame_to_evict( uint32_t *pagedir )
@@ -198,7 +247,7 @@ struct frame_table_entry* clock_frame_next(void)
   struct frame_table_entry *e = list_entry(clock_ptr, struct frame_table_entry, lelem);
   return e;
 }
-
+#endif
 
 static void
 vm_frame_set_pinned (void *kpage, bool new_value)
