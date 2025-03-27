@@ -183,7 +183,8 @@ pick_frame_to_evict(uint32_t* pagedir)
   for (e = list_begin(&frame_list); e != list_end(&frame_list); e = list_next(e))
   {
       struct frame_table_entry *f = list_entry(e, struct frame_table_entry, lelem);
-      if (f->pinned)
+      /* TODO Other threads'pages could be evicted, too. */
+      if (f->pinned || f->t->pagedir != pagedir)
           continue;
 
       /* Check and update access bit */
@@ -220,7 +221,10 @@ struct frame_table_entry* pick_frame_to_evict( uint32_t *pagedir )
   {
     struct frame_table_entry *e = clock_frame_next();
     /* if pinned, continue */
-    if(e->pinned) continue;
+    /* TODO Other threads'pages could be evicted, too. */
+    if(e->pinned || e->t->pagedir != pagedir)
+      continue;
+    
     /* if referenced, give a second chance. */
     else if( pagedir_is_accessed(pagedir, e->upage)) 
     {
