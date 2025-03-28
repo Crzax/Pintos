@@ -21,6 +21,7 @@ struct process_control_block
     pid_t pid;                              /**< The pid of process */
     const char* cmdline;                    /**< The command line of this process being executed */
     struct list_elem elem;                  /**< element for thread.child_list */    
+    struct thread* parent_thread;           /**< the parent process. */
     bool waiting;                           /**< indicates whether parent process is waiting on this. */
     bool exited;                            /**< indicates whether the process is done (exited). */
     bool orphan;                            /**< indicates whether the parent process has terminated before. */
@@ -36,7 +37,8 @@ struct file_desc
 {
     int id;                                 /**< Identify file. */
     struct list_elem elem;                  /**< element for thread.file_descriptors */
-    struct file* file;                      /**< file object. */
+    void* file;                             /**< file object. */
+    bool is_dir;                            /**< true if it is a directory. */
 };
 
 #ifdef VM

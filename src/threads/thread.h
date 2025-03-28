@@ -124,7 +124,9 @@ struct thread
    /* Project 3: Memory Mapped Files. */
    struct list mmap_list;                  /**< List of struct mmap_desc. */
 #endif
-
+#ifdef FILESYS
+   struct inode *cwd_inode;                  /**< Current working directory inode. */
+#endif
     /* Owned by thread.c. */
     unsigned magic;                     /**< Detects stack overflow. */
   };

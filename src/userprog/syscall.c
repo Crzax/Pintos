@@ -16,6 +16,10 @@
 #ifdef VM
 #include "vm/page.h"
 #endif
+#ifdef FILESYS
+#include "filesys/inode.h"
+#include "filesys/directory.h"
+#endif
 
 #ifdef DEBUG
 #define _DEBUG_PRINTF(...) printf(__VA_ARGS__)
@@ -30,7 +34,8 @@ static void check_user (const uint8_t *uaddr);
 static int32_t get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
 static int memread_user (void *src, void *des, size_t bytes);
-static struct file_desc* find_file_desc(struct thread *, int fd);
+enum fd_search_filter { FD_FILE = 1, FD_DIRECTORY = 2 };
+static struct file_desc* find_file_desc(struct thread *, int fd, enum fd_search_filter flag);
 static bool validate_user_string(const char *uaddr);
 static int fail_invalid_access(void);
 
@@ -43,7 +48,13 @@ static struct mmap_desc* find_mmap_desc(struct thread *, mmapid_t fd);
 void preload_and_pin_pages(const void *, size_t);
 void unpin_preloaded_pages(const void *, size_t);
 #endif
-
+#ifdef FILESYS
+bool sys_chdir(const char *filename);
+bool sys_mkdir(const char *filename);
+bool sys_readdir(int fd, char *filename);
+bool sys_isdir(int fd);
+int sys_inumber(int fd);
+#endif
 struct lock filesys_lock;
 
 void
@@ -212,6 +223,68 @@ syscall_handler (struct intr_frame *f UNUSED)
             break;
           }
 #endif
+#ifdef FILESYS
+  case SYS_CHDIR: // 15
+    {
+      const char* filename;
+      int return_code;
+
+      memread_user(f->esp + 4, &filename, sizeof(filename));
+
+      return_code = sys_chdir(filename);
+      f->eax = return_code;
+      break;
+    }
+
+  case SYS_MKDIR: // 16
+    {
+      const char* filename;
+      int return_code;
+
+      memread_user(f->esp + 4, &filename, sizeof(filename));
+
+      return_code = sys_mkdir(filename);
+      f->eax = return_code;
+      break;
+    }
+
+  case SYS_READDIR: // 17
+    {
+      int fd;
+      char *name;
+      int return_code;
+
+      memread_user(f->esp + 4, &fd, sizeof(fd));
+      memread_user(f->esp + 8, &name, sizeof(name));
+
+      return_code = sys_readdir(fd, name);
+      f->eax = return_code;
+      break;
+    }
+
+  case SYS_ISDIR: // 18
+    {
+      int fd;
+      int return_code;
+
+      memread_user(f->esp + 4, &fd, sizeof(fd));
+      return_code = sys_isdir(fd);
+      f->eax = return_code;
+      break;
+    }
+
+  case SYS_INUMBER: // 19
+    {
+      int fd;
+      int return_code;
+
+      memread_user(f->esp + 4, &fd, sizeof(fd));
+      return_code = sys_inumber(fd);
+      f->eax = return_code;
+      break;
+    }
+
+#endif
       /* unhandled case */
       default:
         printf("[ERROR] system call %d is unimplemented!\n", syscall_number);
@@ -277,7 +350,7 @@ sys_create(const char* filename, unsigned initial_size)
   check_user((const uint8_t*) filename);
 
   lock_acquire (&filesys_lock);
-  return_code = filesys_create(filename, initial_size);
+  return_code = filesys_create(filename, initial_size, false);
   lock_release (&filesys_lock);  
   return return_code;
 }
@@ -309,7 +382,8 @@ sys_open(const char* file)
   }
 
   lock_acquire (&filesys_lock);
-  file_opened = filesys_open(file);
+  bool is_dir;
+  file_opened = filesys_open(file, &is_dir);
   if (!file_opened) {
     palloc_free_page (fd);
     lock_release (&filesys_lock);
@@ -317,7 +391,7 @@ sys_open(const char* file)
   }
 
   fd->file = file_opened;
-
+  fd->is_dir = is_dir;
   struct list* fd_list = &thread_current ()->file_descriptors;
   if (list_empty(fd_list)) 
     {
@@ -341,7 +415,7 @@ sys_filesize(int fd)
 
   struct file_desc* file_d;
 
-  file_d = find_file_desc(thread_current(), fd);
+  file_d = find_file_desc(thread_current(), fd, FD_FILE);
 
   if(file_d == NULL) 
   {
@@ -357,14 +431,12 @@ sys_filesize(int fd)
 void sys_seek(int fd, unsigned position) 
 {
   lock_acquire (&filesys_lock);
-  struct file_desc* file_d = find_file_desc(thread_current(), fd);
+  struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE);
 
   if(file_d && file_d->file) 
     {
       file_seek(file_d->file, position);
     }
-  else
-    return; // TODO need sys_exit?
   lock_release (&filesys_lock);
 }
 
@@ -372,7 +444,7 @@ unsigned
 sys_tell(int fd) 
 {
   lock_acquire (&filesys_lock);
-  struct file_desc* file_d = find_file_desc(thread_current(), fd);
+  struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE);
   unsigned ret;
   if(file_d && file_d->file) 
     {
@@ -389,11 +461,13 @@ void
 sys_close(int fd) 
 {
   lock_acquire (&filesys_lock);
-  struct file_desc* file_d = find_file_desc(thread_current(), fd);
-
+  struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE | FD_DIRECTORY);
   if(file_d && file_d->file) 
     {
-      file_close(file_d->file);
+      if (file_d->is_dir)
+        dir_close(file_d->file);
+      else
+        file_close(file_d->file);
       list_remove(&(file_d->elem));
       palloc_free_page(file_d);
     }
@@ -426,7 +500,7 @@ sys_read(int fd, void *buffer, unsigned size)
   else 
     {
       /* read from file */
-      struct file_desc* file_d = find_file_desc(thread_current(), fd);
+      struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE);
 
       if(file_d && file_d->file) 
         {
@@ -461,7 +535,7 @@ sys_write(int fd, const void *buffer, unsigned size) {
   else 
     {
       /* write into file */
-      struct file_desc* file_d = find_file_desc(thread_current(), fd);
+      struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE);
 
       if(file_d && file_d->file) 
         {
@@ -493,7 +567,7 @@ mmapid_t sys_mmap(int fd, void *upage) {
 
   /* 1. Open file */
   struct file *f = NULL;
-  struct file_desc* file_d = find_file_desc(thread_current(), fd);
+  struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE);
   if(file_d && file_d->file) 
     {
       /* reopen file so that it doesn't interfere with process itself
@@ -681,7 +755,7 @@ memread_user (void *src, void *dst, size_t bytes)
 
 /** Find file description. */
 static struct file_desc*
-find_file_desc(struct thread *t, int fd)
+find_file_desc(struct thread *t, int fd, enum fd_search_filter flag)
 {
   ASSERT (t != NULL);
 
@@ -699,7 +773,10 @@ find_file_desc(struct thread *t, int fd)
       struct file_desc *desc = list_entry(e, struct file_desc, elem);
       if(desc->id == fd) 
       {
-        return desc;
+        if (desc->is_dir && (flag & FD_DIRECTORY) )
+          return desc;
+        else if (desc->is_dir == false && (flag & FD_FILE) )
+          return desc;
       }
     }
   }
@@ -751,6 +828,78 @@ void unpin_preloaded_pages(const void *buffer, size_t size)
   {
     vm_unpin_page (supt, upage);
   }
+}
+
+#endif
+#ifdef FILESYS
+
+bool sys_chdir(const char *filename)
+{
+  bool return_code;
+  check_user((const uint8_t*) filename);
+
+  lock_acquire (&filesys_lock);
+  return_code = filesys_change_dir(filename);
+  lock_release (&filesys_lock);
+
+  return return_code;
+}
+
+bool sys_mkdir(const char *filename)
+{
+  bool return_code;
+  check_user((const uint8_t*) filename);
+
+  lock_acquire (&filesys_lock);
+  return_code = filesys_create(filename, 0, true);
+  lock_release (&filesys_lock);
+
+  return return_code;
+}
+
+bool sys_readdir(int fd, char *name)
+{
+  struct file_desc* file_d;
+  bool ret = false;
+
+  lock_acquire (&filesys_lock);
+  file_d = find_file_desc(thread_current(), fd, FD_DIRECTORY);
+  if (file_d == NULL) goto done;
+
+  struct inode *inode;
+  inode = file_get_inode(file_d->file); // file descriptor -> inode
+  if(inode == NULL) goto done;
+
+  // check whether it is a valid directory
+  if(! inode_is_dir(inode)) goto done;
+
+  ret = dir_readdir (file_d->file, name);
+
+done:
+  lock_release (&filesys_lock);
+  return ret;
+}
+
+bool sys_isdir(int fd)
+{
+  lock_acquire (&filesys_lock);
+
+  struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE | FD_DIRECTORY);
+  bool ret = file_d->is_dir;
+
+  lock_release (&filesys_lock);
+  return ret;
+}
+
+int sys_inumber(int fd)
+{
+  lock_acquire (&filesys_lock);
+
+  struct file_desc* file_d = find_file_desc(thread_current(), fd, FD_FILE | FD_DIRECTORY);
+  int ret = (int) inode_get_inumber (file_get_inode(file_d->file));
+
+  lock_release (&filesys_lock);
+  return ret;
 }
 
 #endif

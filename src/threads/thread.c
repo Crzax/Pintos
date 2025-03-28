@@ -15,6 +15,11 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#ifdef FILESYS
+#include "filesys/directory.h"
+#include "filesys/filesys.h"
+#include "filesys/inode.h"
+#endif
 
 /** Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -204,12 +209,13 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
-
+  struct thread *running = thread_current();
+  t->cwd_inode = running == NULL ? NULL : inode_reopen(running->cwd_inode); /**< Get Parents Current Working Directory */
   /* Add to run queue. */
   thread_unblock (t);
 
   /* Switch to higher priority immediately.*/
-  if (thread_current ()->priority < priority)
+  if (running ->priority < priority)
   {
     thread_yield();
   }
@@ -649,6 +655,9 @@ init_thread (struct thread *t, const char *name, int priority)
 #endif
 #ifdef VM
   list_init(&t->mmap_list);
+#endif
+#ifdef FILESYS
+  t->cwd_inode = NULL;
 #endif
 }
 
