@@ -209,6 +209,7 @@ filesys_remove (const char *name)
           inode_close(curr->cwd_inode);
           curr->cwd_inode = NULL;
         }
+        inode_close(inode);
         success = dir_remove (parent_dir, filename);
       }
     } else { // Just File.

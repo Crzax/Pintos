@@ -93,52 +93,77 @@ inode_init (void)
   list_init (&open_inodes);
 }
 
-static void inode_destroy (struct inode_disk *disk_inode) 
-{
+static void inode_destroy(struct inode_disk *disk_inode) {
   block_sector_t index = 0;
   block_sector_t *records = NULL;
 
+  /* Evict direct blocks */
   while (index < DIRECT_BLOCKS && index < disk_inode->end) {
-    free_map_release (disk_inode->direct[index], 1);
-    index++;
+      free_map_release(disk_inode->direct[index], 1);
+      index++;
   }
-  if (index == disk_inode->end) return;
-
-  index -= DIRECT_BLOCKS;
-  records = malloc (BLOCK_SECTOR_SIZE);
-  cache_read (disk_inode->indirect, 0, 0, BLOCK_SECTOR_SIZE, records);
-  while (index < RECORDS_IN_BLOCK && index + DIRECT_BLOCKS < disk_inode->end) {
-    free_map_release (records[index], 1);
-    index++;
-  }
-  free (records);
-  free_map_release (disk_inode->indirect, 1);
-  if (index + DIRECT_BLOCKS == disk_inode->end) return;
-
-  index -= RECORDS_IN_BLOCK;
-  records = malloc (BLOCK_SECTOR_SIZE);
-  cache_read (disk_inode->doubly_indirect, 0, 0, BLOCK_SECTOR_SIZE, records);
-  block_sector_t outer_index = index / RECORDS_IN_BLOCK;
-  block_sector_t inner_index = index % RECORDS_IN_BLOCK;
-  while (outer_index < RECORDS_IN_BLOCK) {
-    block_sector_t inner_records[RECORDS_IN_BLOCK];
-    cache_read (records[outer_index], 0, 0, BLOCK_SECTOR_SIZE, inner_records);
-    while (inner_index < RECORDS_IN_BLOCK
-          && inner_index + (outer_index + 1) * RECORDS_IN_BLOCK + DIRECT_BLOCKS < disk_inode->end) {
-            free_map_release (inner_records[inner_index], 1);
-            inner_index++;
-          }
-    free_map_release (records[outer_index], 1);
-    if (inner_index + (outer_index + 1) * RECORDS_IN_BLOCK + DIRECT_BLOCKS == disk_inode->end) {
-      free_map_release (disk_inode->doubly_indirect, 1);
-      free (records);
+  if (index == disk_inode->end) {
       return;
-    }
-    outer_index++;
-    inner_index %= RECORDS_IN_BLOCK;
   }
-  free_map_release (disk_inode->doubly_indirect, 1);
-  free (records);
+
+  /* Evict indirect blocks */
+  if (disk_inode->indirect) {
+      records = malloc(BLOCK_SECTOR_SIZE);
+      if (records == NULL) {
+          return;
+      }
+      cache_read(disk_inode->indirect, 0, 0, BLOCK_SECTOR_SIZE, records);
+      block_sector_t indirect_blocks = disk_inode->end - DIRECT_BLOCKS;
+      for (int i = 0; i < indirect_blocks && i < RECORDS_IN_BLOCK; i++) {
+          free_map_release(records[i], 1);
+      }
+      free_map_release(disk_inode->indirect, 1);
+      free(records);
+      index += RECORDS_IN_BLOCK;
+      if (index >= disk_inode->end) {
+          return;
+      }
+  }
+
+  /* Evict doubly indirect blocks */
+  if (disk_inode->doubly_indirect) {
+      block_sector_t *dindirect = malloc(BLOCK_SECTOR_SIZE);
+      if (dindirect == NULL) {
+          return;
+      }
+      cache_read(disk_inode->doubly_indirect, 0, 0, BLOCK_SECTOR_SIZE, dindirect);
+
+      /* Recompute the number of blocks to evict */
+      block_sector_t remaining = disk_inode->end - (DIRECT_BLOCKS + RECORDS_IN_BLOCK);
+      for (int i = 0; i < RECORDS_IN_BLOCK; i++) {
+          if (dindirect[i] == 0) {
+              continue;
+          }
+
+          block_sector_t *indirect = malloc(BLOCK_SECTOR_SIZE);
+          if (indirect == NULL) {
+              free(dindirect);
+              return;
+          }
+          cache_read(dindirect[i], 0, 0, BLOCK_SECTOR_SIZE, indirect);
+
+          block_sector_t count = (remaining > RECORDS_IN_BLOCK) ? RECORDS_IN_BLOCK : remaining;
+          for (int j = 0; j < count; j++) {
+              free_map_release(indirect[j], 1);
+          }
+          remaining -= count;
+
+          free_map_release(dindirect[i], 1);
+          free(indirect);
+
+          if (remaining == 0) {
+              break;
+          }
+      }
+
+      free_map_release(disk_inode->doubly_indirect, 1);
+      free(dindirect);
+  }
 }
 
 static bool inode_grow (struct inode_disk *disk_inode, size_t sectors) {
