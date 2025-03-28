@@ -115,6 +115,9 @@ static int cache_load (block_sector_t sector) {
   return slot_idx;
 }
 
+/** Reads SIZE bytes from SECTOR into 
+   buffer BUFFER, starting at SECTOR_OFS
+   and BUFFER_OFS. */
 void cache_read (block_sector_t sector, int sector_ofs, off_t buffer_ofs, size_t size, void *buffer_) {
   uint8_t *buffer = buffer_;
 
@@ -131,6 +134,9 @@ void cache_read (block_sector_t sector, int sector_ofs, off_t buffer_ofs, size_t
 }
 
 
+/** Writes SIZE bytes from BUFFER into 
+   sector SECTOR, starting at SECTOR_OFS
+   and BUFFER_OFS. */
 void cache_write (block_sector_t sector, int sector_ofs, off_t buffer_ofs, size_t size, const void *buffer_) {
   const uint8_t *buffer = buffer_;
 
