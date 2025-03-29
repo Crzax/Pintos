@@ -15,7 +15,7 @@
 #define FLUSH_INTERVAL (5 * TIMER_FREQ) 
 
 static void cache_flush_slot (size_t slot_idx);
-static void cache_flush (void);
+static void cache_flush (bool clear);
 static void cache_flush_daemon(void* aux UNUSED);
 
 struct block_slot {
@@ -51,12 +51,12 @@ void cache_init (void) {
 static void cache_flush_daemon(void* aux UNUSED) {
   while (true) {
       timer_sleep(FLUSH_INTERVAL);
-      cache_flush();
+      cache_flush(false);
   }
 }
 
 void cache_destroy (void) {
-  cache_flush ();
+  cache_flush (true);
   free(buffer_cache);
   bitmap_destroy(free_slots);
 }
@@ -77,16 +77,18 @@ static void cache_flush_slot (size_t slot_idx) {
   buffer_cache[slot_idx].dirty = false;
 }
 
-static void cache_flush (void) {
+static void cache_flush (bool clear) {
   lock_acquire(&cache_lock);
   int i = 0;
   for (; i < CACHE_CAPACITY; i++) {
     if (buffer_cache[i].dirty)
       cache_flush_slot (i);
-    if (buffer_cache[i].accessed)
-      buffer_cache[i].accessed = false;
-    if (buffer_cache[i].user_count == 0)
-      bitmap_reset (free_slots, i);
+    if (clear) {
+      if (buffer_cache[i].accessed)
+        buffer_cache[i].accessed = false;
+      if (buffer_cache[i].user_count == 0)
+        bitmap_reset (free_slots, i);
+    }
   }
   lock_release(&cache_lock);
 }
