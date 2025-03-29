@@ -125,8 +125,9 @@ struct thread
    struct list mmap_list;                  /**< List of struct mmap_desc. */
 #endif
 #ifdef FILESYS
-   struct inode *cwd_inode;                  /**< Current working directory inode. */
+   struct dir *dir;                       /** Current directory. */
 #endif
+
     /* Owned by thread.c. */
     unsigned magic;                     /**< Detects stack overflow. */
   };

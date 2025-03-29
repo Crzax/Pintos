@@ -6,13 +6,18 @@
 #include "filesys/free-map.h"
 #include "filesys/inode.h"
 #include "filesys/directory.h"
+#include "filesys/cache.h"
 #include "threads/thread.h"
+#include "threads/malloc.h"
 
 /** Partition that contains the file system. */
 struct block *fs_device;
 
 static void do_format (void);
-static int get_next_part (char part[NAME_MAX + 1], const char **srcp);
+
+/* ADDED */
+char* path_to_name(const char* path_name);
+struct dir* path_to_dir(const char* path);
 
 /** Initializes the file system module.
    If FORMAT is true, reformats the file system. */
@@ -23,10 +28,11 @@ filesys_init (bool format)
   if (fs_device == NULL)
     PANIC ("No file system device found, can't initialize file system.");
 
+  /* ADDED */
+  init_cache();
   inode_init ();
   free_map_init ();
   
-  cache_init();
   if (format) 
     do_format ();
 
@@ -38,124 +44,34 @@ filesys_init (bool format)
 void
 filesys_done (void) 
 {
+  write_back(true);
   free_map_close ();
-
-  cache_destroy ();
 }
 
-
-
-/** Extracts a file name part from *SRCP into PART, and updates *SRCP so that the
-  next call will return the next file name part. Returns 1 if successful, 0 at
-  end of string, -1 for a too-long file name part. */
-static int
-get_next_part (char part[NAME_MAX + 1], const char **srcp) {
-    const char *src = *srcp;
-    char *dst = part;
-
-    /* Skip leading slashes. If it’s all slashes, we’re done. */
-    while (*src == '/')
-        src++;
-    if (*src == '\0' || *src == ' ')
-        return 0;
-
-    /* Copy up to NAME_MAX character from SRC to DST. Add null terminator. */
-    while (*src != '/' && *src != '\0' && *src != ' ') {
-        if (dst < part + NAME_MAX)
-            *dst++ = *src;
-        else
-            return -1;
-        src++;
-    }
-    *dst = '\0';
-
-    /* Advance source pointer. */
-    *srcp = src;
-    return 1;
-}
-
-/* -1: Invalid Path
- *  0: Not Found, but it is last part
- *  1: Found, and it is last part
- */
-static int
-find_file (const char *src, char* filename, struct dir **cwd, struct inode **next_inode)
-{
-  int result = -1;
-  *cwd = NULL;
-  struct inode* cwd_inode = thread_current()->cwd_inode;
-  /* Check if given name corresponds to relative
-      or absolute path. */
-  if (src[0] == '/') {
-    *cwd = dir_open_root();
-    if (src[1] == '\0' || src[1] == ' ') { /* Searched file is / */
-      *next_inode = inode_open (ROOT_DIR_SECTOR);
-      return 1;
-    }
-  } else {
-    if (cwd_inode == NULL) return result;
-    *cwd = dir_open (inode_reopen(cwd_inode));
-  }
-
-  filename[0] = '\0';
-  
-  /* Iterate over directories until we hit a file or the end. */
-  while (get_next_part (filename, &src) > 0) 
-  { 
-    bool is_last_part = *src == '\0' || *src == ' ';
-    bool found = dir_lookup (*cwd, filename, next_inode);
-
-    if (found) {
-      if (is_last_part) {
-        result = 1;
-        break;
-      }
-    } else if (is_last_part) {
-      result = 0;
-      break;
-    } else/* Invalid Path */
-      break;
-    
-    dir_close(*cwd);
-    *cwd = dir_open (*next_inode);
-  }
-  return result;
-}
-
 /** Creates a file named NAME with the given INITIAL_SIZE.
    Returns true if successful, false otherwise.
    Fails if a file named NAME already exists,
    or if internal memory allocation fails. */
 bool
-filesys_create (const char *name, off_t initial_size, bool is_dir)
-{ 
-  char filename[NAME_MAX + 1];
-  struct dir *parent_dir;
-  struct inode *inode;
-  bool res = find_file(name, filename, &parent_dir, &inode);
-  if (res != 0) {
-    dir_close(parent_dir);
-    return false;
-  }
-  
+filesys_create (const char *name, off_t initial_size, bool is_dir) 
+{
   block_sector_t inode_sector = 0;
-  if (parent_dir == NULL || !free_map_allocate (1, &inode_sector))
-    return false;
-  if (!inode_create (inode_sector, initial_size, is_dir)) {
-    free_map_release (inode_sector, 1);
-    return false;
+  struct dir *dir = path_to_dir(name);
+  char* file_name = path_to_name(name);
+
+  bool success = false;
+  if (strcmp(file_name, ".") != 0 && strcmp(file_name, "..") != 0)
+  {
+    success = (dir != NULL
+                  && free_map_allocate (1, &inode_sector)
+                  && inode_create (inode_sector, initial_size, is_dir)
+                  && dir_add (dir, file_name, inode_sector));
   }
-  bool success = true;
-  if (is_dir) {
-    struct dir* new_dir = dir_open(inode_open (inode_sector));
-    success &= (dir_add (new_dir, ".", inode_sector)
-                    && dir_add (new_dir, "..", inode_get_inumber(dir_get_inode(parent_dir))));
-    dir_close (new_dir);
-  }
-  success &= dir_add (parent_dir, filename, inode_sector);
-  dir_close (parent_dir);
-  if (!success)
+  if (!success && inode_sector != 0) 
     free_map_release (inode_sector, 1);
+  dir_close (dir);
+  free(file_name);
+
   return success;
 }
 
@@ -164,23 +80,47 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
    otherwise.
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
-void *
-filesys_open (const char *name, bool *is_dir)
+struct file *
+filesys_open (const char *name)
 {
-  struct dir *dir;
-  struct inode *inode;
-
-  char filename[NAME_MAX + 1];
-  int res = find_file (name, filename, &dir, &inode);
-  dir_close (dir);
-  if (res != 1) {
-    inode_close(inode);
+  if(strlen(name) == 0)
     return NULL;
+
+  struct dir* dir = path_to_dir(name);
+  char* file_name = path_to_name(name);
+  struct inode *inode = NULL;
+
+  if (dir != NULL)
+  {
+  	if (strcmp(file_name, "..") == 0)
+  	{
+      inode = dir_parent_inode(dir);
+  	  if (!inode)
+  	  {
+  	    free(file_name);
+  	    return NULL;
+  	  }
+  	}
+    else if ((dir_is_root(dir) && strlen(file_name) == 0) ||
+	       strcmp(file_name, ".") == 0)
+  	{
+  	  free(file_name);
+  	  return (struct file *) dir;
+  	}
+    else
+  	  dir_lookup (dir, file_name, &inode);
   }
-  
-  bool tmp = inode_is_dir(inode);
-  if (is_dir != NULL) *is_dir = tmp;
-  return tmp ? (void*)dir_open (inode) : (void*)file_open (inode);
+
+  free(file_name);
+  dir_close (dir);
+
+  if (!inode)
+    return NULL;
+
+  if (inode_is_dir(inode))
+    return (struct file *) dir_open(inode);
+
+  return file_open (inode);
 }
 
 /** Deletes the file named NAME.
@@ -188,35 +128,14 @@ filesys_open (const char *name, bool *is_dir)
    Fails if no file named NAME exists,
    or if an internal memory allocation fails. */
 bool
-filesys_remove (const char *name)
+filesys_remove (const char *name) 
 {
-  struct dir *parent_dir;
-  struct inode *inode;
+  struct dir* dir = path_to_dir(name);
+  char* file_name = path_to_name(name);
+  bool success = dir != NULL && dir_remove (dir, file_name);
+  dir_close (dir); 
+  free(file_name);
 
-  char filename[NAME_MAX + 1];
-  int res = find_file (name, filename, &parent_dir, &inode);
-  bool success = false;
-  if (res == 1) {
-    if (inode_is_dir(inode)) {
-      struct dir* target = dir_open(inode);
-      char tmp[NAME_MAX + 1];
-      bool can_be_removed = !dir_readdir(target, tmp);
-      dir_close(target);
-      if (can_be_removed) { // The directory is empty.
-        block_sector_t sector = inode_get_inumber(inode);
-        struct thread* curr = thread_current();
-        if (sector == inode_get_inumber(curr->cwd_inode)) {
-          inode_close(curr->cwd_inode);
-          curr->cwd_inode = NULL;
-        }
-        inode_close(inode);
-        success = dir_remove (parent_dir, filename);
-      }
-    } else { // Just File.
-      success = dir_remove (parent_dir, filename);
-    }
-  }
-  dir_close (parent_dir);
   return success;
 }
 
@@ -232,24 +151,113 @@ do_format (void)
   printf ("done.\n");
 }
 
+
+/** Changes the current working directory to PATH.
+   Returns true if successful, false otherwise. */
 bool
-filesys_change_dir (const char* path) {
-  struct dir *dir;
-  struct inode *inode;
-  char filename[NAME_MAX + 1];
-  int res = find_file (path, filename, &dir, &inode);
-  dir_close(dir);
-  bool success = false;
-  if (res == 1 && inode_is_dir(inode)) {
-    struct thread* curr = thread_current();
-    if (curr->cwd_inode != NULL) inode_close(curr->cwd_inode);
-    curr->cwd_inode = inode;
-    success = true;
+filesys_chdir(const char* path)
+{
+  struct dir* dir = path_to_dir(path);
+  char* name = path_to_name(path);
+  struct inode *inode = NULL;
+  
+  if(dir == NULL) 
+  {
+    free(name);
+    return false;
   }
-  return success;
+  /* special case: go to parent dir */
+  else if(strcmp(name, "..") == 0)
+  {
+    inode = dir_parent_inode(dir);
+    if(inode == NULL)
+    {
+      free(name);
+      return false;
+    }
+  }
+  /* special case: current dir */
+  else if(strcmp(name, ".") == 0 || (strlen(name) == 0 && dir_is_root(dir)))
+  {
+    thread_current()->dir = dir;
+    free(name);
+    return true;
+  }
+  else dir_lookup(dir, name, &inode);
+
+  dir_close(dir);
+
+  /* now open up target dir */
+  dir = dir_open(inode);
+
+  if(dir == NULL) 
+  {
+    free(name);
+    return false;
+  }
+  else
+  {
+    dir_close(thread_current()->dir);
+    thread_current()->dir = dir;
+    free(name);
+    return true;
+  }
 }
 
-int
-filesys_get_inode_number (const void *file) {
-  return inode_get_inumber((const struct inode*)file);
+/** Returns the name of the file in PATH. */
+char*
+path_to_name(const char* path_name)
+{
+  int length = strlen(path_name);  
+  char path[length + 1];
+  memcpy(path, path_name, length + 1);
+
+  char *cur, *ptr, *prev = "";
+  for(cur = strtok_r(path, "/", &ptr); cur != NULL; cur = strtok_r(NULL, "/", &ptr))
+    prev = cur;
+
+  char* name = malloc(strlen(prev) + 1);
+  memcpy(name, prev, strlen(prev) + 1);
+  return name;
+}
+
+/** Returns the directory of the file in PATH. */
+struct dir*
+path_to_dir(const char* path_name)
+{
+  int length = strlen(path_name);
+  char path[length + 1];
+  memcpy(path, path_name, length + 1);
+
+  struct dir* dir;
+  if(path[0] == '/' || !thread_current()->dir)
+    dir = dir_open_root();
+  else
+    dir = dir_reopen(thread_current()->dir);
+  
+  char *cur, *ptr, *prev;
+  prev = strtok_r(path, "/", &ptr);
+  for(cur = strtok_r(NULL, "/", &ptr); cur != NULL;
+    prev = cur, cur = strtok_r(NULL, "/", &ptr))
+  {
+    struct inode* inode;
+    if(strcmp(prev, ".") == 0) continue;
+    else if(strcmp(prev, "..") == 0)
+    {
+      inode = dir_parent_inode(dir);
+      if(inode == NULL) return NULL;
+    }
+    else if(dir_lookup(dir, prev, &inode) == false)
+      return NULL;
+
+    if(inode_is_dir(inode))
+    {
+      dir_close(dir);
+      dir = dir_open(inode);
+    }
+    else
+      inode_close(inode);
+  }
+
+  return dir;
 }

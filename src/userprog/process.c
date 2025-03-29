@@ -12,7 +12,6 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
-#include "filesys/inode.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -76,7 +75,6 @@ process_execute(const char *file_name)
   
   /* Initial PCB. */
   pcb->pid = PID_INITIALIZING;
-  pcb->parent_thread = thread_current();
   pcb->cmdline = cmd_all;
   pcb->waiting = false;
   pcb->exited = false;
@@ -168,6 +166,11 @@ start_process(void *pcb_)
   if (!success) {
     sys_exit(-1);
   }
+#ifdef FILESYS
+  /* Set the working directory to the root directory. */
+  if (!thread_current()->dir)
+    thread_current()->dir = dir_open_root();
+#endif
 
   /* Start the user process by simulating a return from an interrupt. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
@@ -261,10 +264,15 @@ process_exit (void)
     {
       struct list_elem *e = list_pop_front (fdlist);
       struct file_desc *desc = list_entry(e, struct file_desc, elem);
-      if (!desc->is_dir)
-        file_close(desc->file);
+      struct inode* inode = file_get_inode(desc->file);
+
+      if(inode == NULL)
+        continue;
+
+      if(inode_is_dir(inode))
+        dir_close(desc->file);
       else
-        dir_close ((struct dir*)desc->file);
+        file_close (desc->file);
       palloc_free_page(desc); /**< see sys_open(). */
     }
 #ifdef VM
@@ -296,14 +304,15 @@ process_exit (void)
           /* the child process becomes an orphan.
            do not free pcb yet, postpone until the child terminates. */
           pcb->orphan = true;
-          pcb->parent_thread = NULL;
         }
     }
 #ifdef FILESYS
-    /* Destroy the current process's current working directory. */
-    inode_close(cur->cwd_inode);
+  /* 3. close the current directory. */
+  if (thread_current()->dir)
+    dir_close(thread_current()->dir);
 #endif
-  /* Release file for the executable */
+
+    /* Release file for the executable */
   if(cur->executing_file) 
     {
       file_allow_write(cur->executing_file);
@@ -461,7 +470,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
   process_activate ();
 
   /* Open executable file. */
-  file = filesys_open (file_name, NULL);
+  file = filesys_open (file_name);
   if (file == NULL) 
     {
       printf ("load: %s: open failed\n", file_name);

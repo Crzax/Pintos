@@ -1,156 +1,195 @@
 #include "filesys/cache.h"
 #include "filesys/filesys.h"
 #include "threads/malloc.h"
-
-#include "threads/synch.h"
 #include "threads/thread.h"
+#include "threads/synch.h"
 
-#include "devices/timer.h"
+#define WRITE_BACK_PERIOD 4 * TIMER_FREQ
 
-#include <string.h>
-#include <bitmap.h>
-#include <stdint.h>
-#include <hash.h>
+/** Init the cache of IDX. */
+void 
+init_entry(int idx)
+{
+  cache_array[idx].is_free = true;
+  cache_array[idx].open_cnt = 0;
+  cache_array[idx].dirty = false;
+  cache_array[idx].accessed = false;
+}
 
-#define FLUSH_INTERVAL (5 * TIMER_FREQ) 
-
-static void cache_flush_slot (size_t slot_idx);
-static void cache_flush (bool clear);
-static void cache_flush_daemon(void* aux UNUSED);
-
-struct block_slot {
-  block_sector_t sector;              /**< Sector index in block device. */
-  uint8_t data[BLOCK_SECTOR_SIZE];
-  bool accessed;
-  bool dirty;
-  uint32_t user_count;
-};
-
-struct block_slot *buffer_cache;
-struct bitmap *free_slots;
-
-struct lock cache_lock;
-
-
-void cache_init (void) {
-  buffer_cache = malloc(sizeof(struct block_slot) * CACHE_CAPACITY);
+/** Init all caches. */
+void 
+init_cache(void)
+{
   int i;
-  for (i = 0; i < CACHE_CAPACITY; i++) {
-    buffer_cache[i].sector = -1;  /**< At the beginning there must be no cache hits. */
-    buffer_cache[i].accessed = false;
-    buffer_cache[i].dirty = false;
-    buffer_cache[i].user_count = 0;
-  }
-  
-  free_slots = bitmap_create(CACHE_CAPACITY);
   lock_init(&cache_lock);
+  for(i = 0; i < CACHE_MAX_SIZE; i++)
+    init_entry(i);
 
-  thread_create("cache-flush-daemon", PRI_DEFAULT, cache_flush_daemon, NULL);
+  thread_create("cache_writeback", PRI_MIN, func_periodic_writer, NULL);
 }
 
-static void cache_flush_daemon(void* aux UNUSED) {
-  while (true) {
-      timer_sleep(FLUSH_INTERVAL);
-      cache_flush(false);
-  }
-}
-
-void cache_destroy (void) {
-  cache_flush (true);
-  free(buffer_cache);
-  bitmap_destroy(free_slots);
-}
-
-
-/* Helpers */
-
-static int cache_find (block_sector_t sector) {
-  int i = 0;
-  for (; i < CACHE_CAPACITY; i++)
-    if (buffer_cache[i].sector == sector)
-      return i;
+/** Get the cache of DISK_SECTOR. */
+int 
+get_cache_entry(block_sector_t disk_sector)
+{
+  int i;
+  for(i = 0; i < CACHE_MAX_SIZE; i++) 
+  {
+    if(cache_array[i].disk_sector == disk_sector)
+    {
+      if(!cache_array[i].is_free)
+        return i;
+    }
+  }  
   return -1;
 }
 
-static void cache_flush_slot (size_t slot_idx) {
-  block_write (fs_device, buffer_cache[slot_idx].sector, buffer_cache[slot_idx].data);
-  buffer_cache[slot_idx].dirty = false;
-}
-
-static void cache_flush (bool clear) {
-  lock_acquire(&cache_lock);
-  int i = 0;
-  for (; i < CACHE_CAPACITY; i++) {
-    if (buffer_cache[i].dirty)
-      cache_flush_slot (i);
-    if (clear) {
-      if (buffer_cache[i].accessed)
-        buffer_cache[i].accessed = false;
-      if (buffer_cache[i].user_count == 0)
-        bitmap_reset (free_slots, i);
+/** Get the first free cache. */
+int 
+get_free_entry(void)
+{
+  int i;
+  for(i = 0; i < CACHE_MAX_SIZE; i++)
+  {
+    if(cache_array[i].is_free == true)
+    {
+      cache_array[i].is_free = false;
+      return i;
     }
   }
-  lock_release(&cache_lock);
+
+  return -1;  /**< All caches are full. */
 }
 
-static int cache_get_slot (void) {
-  size_t i = bitmap_scan_and_flip(free_slots, 0, 1, false);
-  if (i != BITMAP_ERROR) return i;
-  while (true) {
-    i = 0;
-    for (; i < CACHE_CAPACITY; i++) {
-      if (buffer_cache[i].accessed)
-        buffer_cache[i].accessed = false;
-      else if (buffer_cache[i].user_count == 0) { /**< Evict */
-        if (buffer_cache[i].dirty)  /**< Flush */
-          cache_flush_slot (i);
-        return i;
+/** Access the cache of DISK_SECTOR. 
+   Increment the open count of the cache.
+   Set the dirty bit of the cache.
+   If the cache is not in the cache, replace it. */
+int 
+access_cache_entry(block_sector_t disk_sector, bool dirty)
+{
+  lock_acquire(&cache_lock);
+  
+  int idx = get_cache_entry(disk_sector);
+  if(idx == -1)
+    idx = replace_cache_entry(disk_sector, dirty);
+  else
+  {
+    cache_array[idx].open_cnt++;
+    cache_array[idx].accessed = true;
+    cache_array[idx].dirty |= dirty;
+  }
+
+  lock_release(&cache_lock);
+  return idx;
+}
+
+/** Replace the cache of DISK_SECTOR.
+   Set the dirty bit. 
+   Second chance algorithm is used to evict the cache. */
+int 
+replace_cache_entry(block_sector_t disk_sector, bool dirty)
+{
+  int idx = get_free_entry();
+  int i = 0;
+  if(idx == -1) /**< cache is full. */
+  {
+    for(i = 0; ; i = (i + 1) % CACHE_MAX_SIZE)
+    {
+      /* cache is in use */
+      if(cache_array[i].open_cnt > 0)
+        continue;
+
+      /* cache is not in use but accessed. 
+        Second chance algorithm */
+      if(cache_array[i].accessed == true)
+        cache_array[i].accessed = false;
+
+      /* evict it */
+      else
+      {
+        /* write back */
+        if(cache_array[i].dirty == true)
+        {
+          block_write(fs_device, cache_array[i].disk_sector,
+            &cache_array[i].block);
+        }
+
+        init_entry(i);
+        idx = i;
+        break;
       }
     }
   }
+
+  cache_array[idx].disk_sector = disk_sector;
+  cache_array[idx].is_free = false;
+  cache_array[idx].open_cnt++;
+  cache_array[idx].accessed = true;
+  cache_array[idx].dirty = dirty;
+  block_read(fs_device, cache_array[idx].disk_sector, &cache_array[idx].block);
+
+  return idx;
 }
 
-static int cache_load (block_sector_t sector) {
-  int slot_idx = cache_get_slot ();
-  buffer_cache[slot_idx].sector = sector;
-  block_read (fs_device, sector, buffer_cache[slot_idx].data);
-  return slot_idx;
+/** Write back the cache to disk periodically. */
+void
+func_periodic_writer(void *aux UNUSED)
+{
+    while(true)
+    {
+        timer_sleep(WRITE_BACK_PERIOD);
+        write_back(false);
+    }
 }
 
-/** Reads SIZE bytes from SECTOR into 
-   buffer BUFFER, starting at SECTOR_OFS
-   and BUFFER_OFS. */
-void cache_read (block_sector_t sector, int sector_ofs, off_t buffer_ofs, size_t size, void *buffer_) {
-  uint8_t *buffer = buffer_;
+/** Write back the dirty cache to disk. 
+   If clear is true, clear the cache. */
+void 
+write_back(bool clear)
+{
+    int i;
+    lock_acquire(&cache_lock);
 
-  lock_acquire(&cache_lock);
-  int slot_idx = cache_find (sector);
-  if (slot_idx == -1) /* Cache miss */
-    slot_idx = cache_load (sector);
-  buffer_cache[slot_idx].user_count++;
-  lock_release(&cache_lock);
+    for(i = 0; i < CACHE_MAX_SIZE; i++)
+    {
+        if(cache_array[i].dirty == true)
+        {
+            block_write(fs_device, cache_array[i].disk_sector, &cache_array[i].block);
+            cache_array[i].dirty = false;
+        }
 
-  memcpy (buffer + buffer_ofs, buffer_cache[slot_idx].data + sector_ofs, size);
-  buffer_cache[slot_idx].accessed = true;
-  buffer_cache[slot_idx].user_count--;
+        /* clear cache line (filesys done) */
+        if(clear) 
+          init_entry(i);
+    }
+
+    lock_release(&cache_lock);
 }
 
+/** Read ahead the next block. 
+   Create a thread to read the next block. */
+void 
+func_read_ahead(void *aux)
+{
+    block_sector_t disk_sector = *(block_sector_t *)aux;
+    lock_acquire(&cache_lock);
 
-/** Writes SIZE bytes from BUFFER into 
-   sector SECTOR, starting at SECTOR_OFS
-   and BUFFER_OFS. */
-void cache_write (block_sector_t sector, int sector_ofs, off_t buffer_ofs, size_t size, const void *buffer_) {
-  const uint8_t *buffer = buffer_;
+    int idx = get_cache_entry(disk_sector);
 
-  lock_acquire(&cache_lock);
-  int slot_idx = cache_find (sector);
-  if (slot_idx == -1) /* Cache miss */
-    slot_idx = cache_load (sector);
-  buffer_cache[slot_idx].user_count++;
-  lock_release(&cache_lock);
+    /* need eviction */
+    if (idx == -1)
+        replace_cache_entry(disk_sector, false);
+    
+    lock_release(&cache_lock);
+    free(aux);
+}
 
-  memcpy (buffer_cache[slot_idx].data + sector_ofs, buffer + buffer_ofs, size);
-  buffer_cache[slot_idx].accessed = true;
-  buffer_cache[slot_idx].dirty = true;
-  buffer_cache[slot_idx].user_count--;
+/** Read ahead by creating this thread. */
+void 
+ahead_reader(block_sector_t disk_sector)
+{
+    block_sector_t *arg = malloc(sizeof(block_sector_t));
+    *arg = disk_sector + 1;  /**< next block */
+    thread_create("cache_read_ahead", PRI_MIN, func_read_ahead, arg);
 }
