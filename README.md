@@ -1,6 +1,6 @@
 # Pintos
 
-[中文版本](./README.md)
+[中文版本](./README-cn.md)
 
 This repository contains reference solution example code and [Beamer resources](./beamer) for the operating systems course experiments at Wuhan University. The experiments are adapted from the framework code of Peking University's undergraduate operating systems honor track program.
 
