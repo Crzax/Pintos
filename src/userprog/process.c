@@ -166,6 +166,11 @@ start_process(void *pcb_)
   if (!success) {
     sys_exit(-1);
   }
+#ifdef FILESYS
+  /* Set the working directory to the root directory. */
+  if (!thread_current()->dir)
+    thread_current()->dir = dir_open_root();
+#endif
 
   /* Start the user process by simulating a return from an interrupt. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
@@ -259,7 +264,15 @@ process_exit (void)
     {
       struct list_elem *e = list_pop_front (fdlist);
       struct file_desc *desc = list_entry(e, struct file_desc, elem);
-      file_close(desc->file);
+      struct inode* inode = file_get_inode(desc->file);
+
+      if(inode == NULL)
+        continue;
+
+      if(inode_is_dir(inode))
+        dir_close(desc->file);
+      else
+        file_close (desc->file);
       palloc_free_page(desc); /**< see sys_open(). */
     }
 #ifdef VM
@@ -293,8 +306,13 @@ process_exit (void)
           pcb->orphan = true;
         }
     }
+#ifdef FILESYS
+  /* 3. close the current directory. */
+  if (thread_current()->dir)
+    dir_close(thread_current()->dir);
+#endif
 
-  /* Release file for the executable */
+    /* Release file for the executable */
   if(cur->executing_file) 
     {
       file_allow_write(cur->executing_file);

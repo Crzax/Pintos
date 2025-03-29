@@ -124,6 +124,9 @@ struct thread
    /* Project 3: Memory Mapped Files. */
    struct list mmap_list;                  /**< List of struct mmap_desc. */
 #endif
+#ifdef FILESYS
+   struct dir *dir;                       /** Current directory. */
+#endif
 
     /* Owned by thread.c. */
     unsigned magic;                     /**< Detects stack overflow. */

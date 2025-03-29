@@ -15,6 +15,9 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#ifdef FILESYS
+#include "filesys/directory.h"
+#endif
 
 /** Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -204,7 +207,12 @@ thread_create (const char *name, int priority,
   sf = alloc_frame (t, sizeof *sf);
   sf->eip = switch_entry;
   sf->ebp = 0;
-
+#ifdef FILESYS  
+  if(thread_current()->dir) 
+    t->dir = dir_reopen(thread_current()->dir);
+  else
+    t->dir = NULL;
+#endif
   /* Add to run queue. */
   thread_unblock (t);
 
@@ -636,7 +644,9 @@ init_thread (struct thread *t, const char *name, int priority)
     t->recent_cpu = FP_CONST (0);
   else
     t->recent_cpu = thread_current ()->recent_cpu;
-
+#ifdef FILESYS
+    t->dir = NULL;
+#endif
   old_level = intr_disable ();
   list_insert_ordered (&all_list, &t->allelem, thread_greater_priority, NULL);
   intr_set_level (old_level);

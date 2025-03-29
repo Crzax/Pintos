@@ -43,6 +43,7 @@ struct file;
 size_t bitmap_file_size (const struct bitmap *);
 bool bitmap_read (struct bitmap *, struct file *);
 bool bitmap_write (const struct bitmap *, struct file *);
+bool get_free_map_empty_size(void);
 #endif
 
 /** Debugging. */
