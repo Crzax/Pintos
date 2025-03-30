@@ -323,7 +323,8 @@ vm_supt_mm_unmap(
   return true;
 }
 
-static bool vm_load_page_from_filesys(struct supplemental_page_table_entry *spte, void *kpage)
+bool 
+vm_load_page_from_filesys(struct supplemental_page_table_entry *spte, void *kpage)
 {
   file_seek (spte->file, spte->file_offset);
 

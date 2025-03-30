@@ -28,6 +28,10 @@
 #define vm_frame_free(x) palloc_free_page(x)
 #endif
 
+#ifdef FILESYS
+#include "filesys/inode.h"
+#endif
+
 #ifdef DEBUG
 #define _DEBUG_PRINTF(...) printf(__VA_ARGS__)
 #else

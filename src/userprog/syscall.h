@@ -21,8 +21,18 @@ unsigned sys_tell(int fd);
 void sys_close(int fd);
 int sys_read(int fd, void *buffer, unsigned size);
 int sys_write(int fd, const void *buffer, unsigned size);
+
 #ifdef VM
 /* expose munmap() so that it can be call in sys_exit(); */
-bool sys_munmap (mmapid_t);
+mmapid_t sys_mmap(int fd, void *);
+bool sys_munmap(mmapid_t);
+#endif
+
+#ifdef FILESYS
+bool sys_chdir(char *path);
+bool sys_mkdir(char *path);
+bool sys_readdir(int fd, char *path);
+bool sys_isdir(int fd);
+int sys_inumber(int fd);
 #endif
 #endif /**< userprog/syscall.h */

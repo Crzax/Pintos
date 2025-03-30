@@ -40,7 +40,6 @@
 #include "devices/ide.h"
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
-#include "filesys/inode.h"
 #endif
 
 /** Page directory with kernel mappings only. */
@@ -135,7 +134,6 @@ pintos_init (void)
   ide_init ();
   locate_block_devices ();
   filesys_init (format_filesys);
-  thread_current()->cwd_inode = inode_open(ROOT_DIR_SECTOR);
 #endif
 #ifdef VM
   /* Initialnize swap system (Project3). */

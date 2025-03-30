@@ -91,7 +91,7 @@ byte_to_sector (const struct inode *inode, off_t length, off_t pos)
     }
 
     /* indirect blocks */
-    else if (pos < (DIRECT_BLOCKS + INDIRECT_BLOCKS * INDIRECT_PTRS)
+    else if (pos < (int)(DIRECT_BLOCKS + INDIRECT_BLOCKS * INDIRECT_PTRS)
       * BLOCK_SECTOR_SIZE)
     {
       /* read up corresponding indirect block */
@@ -449,12 +449,6 @@ inode_grow (struct inode *inode, off_t length)
   if (grow_sectors == 0)
     return length;
 
-  /* check if enough space */
-  block_sector_t free_sectors = get_free_map_empty_size();
-  if (free_sectors < grow_sectors) {
-    return -1; // Space not enough, return -1
-  }
-
   /* direct blocks (index < 4) */
   while (inode->direct_index < DIRECT_BLOCKS && grow_sectors != 0)
   {
@@ -467,7 +461,7 @@ inode_grow (struct inode *inode, off_t length)
   }
 
   /* indirect blocks (index < 13) */
-  while (inode->direct_index < DIRECT_BLOCKS + INDIRECT_BLOCKS && grow_sectors != 0)
+  while (inode->direct_index < (int) DIRECT_BLOCKS + INDIRECT_BLOCKS && grow_sectors != 0)
   {
     block_sector_t blocks[128];
     if (inode->indirect_index == 0) {

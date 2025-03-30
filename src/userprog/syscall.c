@@ -37,18 +37,9 @@ static int memread_user (void *src, void *des, size_t bytes);
 static struct file_desc* find_file_desc(struct thread *, int fd);
 static bool validate_user_string(const char *uaddr);
 static int fail_invalid_access(void);
-bool sys_chdir(char *path, struct intr_frame *f);
-bool sys_mkdir(char *path, struct intr_frame *f);
-bool sys_readdir(int fd, char *path, struct intr_frame *f);
-bool sys_isdir(int fd, struct intr_frame *f);
-int sys_inumber(int fd, struct intr_frame *f);
 
 #ifdef VM
-mmapid_t sys_mmap(int fd, void *);
-bool sys_munmap(mmapid_t);
-
 static struct mmap_desc* find_mmap_desc(struct thread *, mmapid_t fd);
-
 void preload_and_pin_pages(const void *, size_t);
 void unpin_preloaded_pages(const void *, size_t);
 #endif
@@ -210,7 +201,7 @@ syscall_handler (struct intr_frame *f UNUSED)
             break;
           }
       
-        case SYS_MUNMAP: // 14
+        case SYS_MUNMAP:
           {
             mmapid_t mid;
             memread_user(f->esp + 4, &mid, sizeof(mid));
@@ -222,36 +213,49 @@ syscall_handler (struct intr_frame *f UNUSED)
 #ifdef FILESYS
         case SYS_CHDIR:
         {
-          const char* filename;
+          char* filename;
+          bool return_code;
           memread_user(f->esp + 4, &filename, sizeof(filename));
-          sys_chdir(filename, f);
+          return_code = sys_chdir(filename);
+          f->eax = (uint32_t) return_code;
           break;
         }
         case SYS_MKDIR:
-        {  const char* filename;
+        {  
+          char* filename;
+          bool return_code;
           memread_user(f->esp + 4, &filename, sizeof(filename));
-          sys_mkdir(filename, f);
+          return_code = sys_mkdir(filename);
+          f->eax = (uint32_t) return_code;
           break;
         }
         case SYS_READDIR:
-        {  int fd;
+        {  
+          int fd;
           char *name;
-          int return_code;
+          bool return_code;
           memread_user(f->esp + 4, &fd, sizeof(fd));
           memread_user(f->esp + 8, &name, sizeof(name));
-          sys_readdir(fd,name,f);
+          return_code = sys_readdir(fd,name);
+          f->eax = (uint32_t) return_code;
           break;
         }
         case SYS_ISDIR:
-         { int fd;
+         { 
+          int fd;
+          bool return_code;
           memread_user(f->esp + 4, &fd, sizeof(fd));
-          sys_isdir(fd, f);
+          return_code = sys_isdir(fd);
+          f->eax = (uint32_t) return_code;
           break;
          }
         case SYS_INUMBER:
-        {  int fd;
+        {  
+          int fd;
+          int return_code;
           memread_user(f->esp + 4, &fd, sizeof(fd));
-          sys_inumber(fd, f);
+          return_code = sys_inumber(fd);
+          f->eax = (uint32_t) return_code;
           break;
         }
 #endif
@@ -514,9 +518,9 @@ sys_write(int fd, const void *buffer, unsigned size) {
 }
 #ifdef VM
 mmapid_t sys_mmap(int fd, void *upage) {
-  // check arguments
+  /* check arguments */
   if (upage == NULL || pg_ofs(upage) != 0) return -1;
-  if (fd <= 1) return -1; // 0 and 1 are unmappable
+  if (fd <= 1) return -1; /**< 0 and 1 are unmappable */
   struct thread *curr = thread_current();
 
   
@@ -524,8 +528,8 @@ mmapid_t sys_mmap(int fd, void *upage) {
   struct file *f = NULL;
   struct file_desc* file_d = find_file_desc(thread_current(), fd);
   if(file_d && file_d->file&& !inode_is_dir(file_get_inode(file_d->file))) {
-    // reopen file so that it doesn't interfere with process itself
-    // it will be store in the mmap_desc struct (later closed on munmap)
+    /* reopen file so that it doesn't interfere with process itself
+     it will be store in the mmap_desc struct (later closed on munmap) */
     f = file_reopen (file_d->file);
   }
   if(f == NULL||inode_is_dir(file_get_inode(file_d->file))) 
@@ -535,14 +539,14 @@ mmapid_t sys_mmap(int fd, void *upage) {
   if(file_size == 0) goto MMAP_FAIL;
 
   /* 2. Mapping memory pages */
-  // First, ensure that all the page address is NON-EXIESENT.
+  /* First, ensure that all the page address is NON-EXIESENT. */
   size_t offset;
   for (offset = 0; offset < file_size; offset += PGSIZE) {
     void *addr = upage + offset;
     if (vm_supt_has_entry(curr->supt, addr)) goto MMAP_FAIL;
   }
 
-  // Now, map each page to filesystem
+  /* Now, map each page to filesystem */
   for (offset = 0; offset < file_size; offset += PGSIZE) {
     void *addr = upage + offset;
 
@@ -567,12 +571,12 @@ mmapid_t sys_mmap(int fd, void *upage) {
   mmap_d->size = file_size;
   list_push_back (&curr->mmap_list, &mmap_d->elem);
 
-  // OK, release and return the mid
+  /* OK, release and return the mid */
   return mid;
 
 
 MMAP_FAIL:
-  // finally: release and return
+  /* finally: release and return */
   return -1;
 }
 
@@ -604,24 +608,24 @@ bool sys_munmap(mmapid_t mid)
 }
 #endif
 #ifdef FILESYS
-bool sys_chdir(char* path, struct intr_frame *f)
+bool 
+sys_chdir(char* path)
 {
     check_user((const uint8_t*) path);
     bool success = filesys_chdir(path);
-    f->eax = success;
     return success;
 }
 
-bool sys_mkdir(char* path, struct intr_frame *f)
+bool 
+sys_mkdir(char* path)
 {
     bool success = filesys_create(path, 0, true);
-    f->eax = success;
     return success;
-  }
+}
 
-bool sys_readdir(int fd, char* path, struct intr_frame *f)
+bool 
+sys_readdir(int fd, char* path)
 {
-    f->eax = false;
     ASSERT (fd >= 0);
     
     struct file* file = find_file_desc(thread_current(), fd)->file;
@@ -631,18 +635,15 @@ bool sys_readdir(int fd, char* path, struct intr_frame *f)
     if(inode == NULL) return false;
     if(!inode_is_dir(inode)) return false;
     
-    // struct dir* dir = dir_open(inode);
     struct dir* dir = (struct dir*) file;
-    // if(dir == NULL) return false;
     if(!dir_readdir(dir, path)) return false;
     
-    f->eax = true;
     return true;
 }
 
-bool sys_isdir(int fd, struct intr_frame *f)
+bool 
+sys_isdir(int fd)
 {
-    f->eax = false;
     ASSERT (fd >= 0);
 
     struct file* file = find_file_desc(thread_current(), fd)->file;
@@ -652,13 +653,12 @@ bool sys_isdir(int fd, struct intr_frame *f)
     if(inode == NULL) return false;
     if(!inode_is_dir(inode)) return false;
     
-    f->eax = true;
     return true;
 }
 
-int sys_inumber(int fd, struct intr_frame *f)
+int 
+sys_inumber(int fd)
 {
-    f->eax = -1;
     ASSERT (fd >= 0);
 
     struct file* file = find_file_desc(thread_current(), fd)->file;
@@ -668,7 +668,6 @@ int sys_inumber(int fd, struct intr_frame *f)
     if(inode == NULL) return -1;
 
     block_sector_t inumber = inode_get_inumber(inode);
-    f->eax = inumber;
     return inumber;
 }
 #endif
@@ -791,6 +790,7 @@ find_file_desc(struct thread *t, int fd)
   return NULL; /**< not found */
 }
 #ifdef VM
+/** Find mmap description. */
 static struct mmap_desc*
 find_mmap_desc(struct thread *t, mmapid_t mid)
 {
@@ -809,10 +809,10 @@ find_mmap_desc(struct thread *t, mmapid_t mid)
     }
   }
 
-  return NULL; // not found
+  return NULL; /**< not found */
 }
 
-
+/** Preload and pin pages. */
 void preload_and_pin_pages(const void *buffer, size_t size)
 {
   struct supplemental_page_table *supt = thread_current()->supt;
@@ -826,6 +826,7 @@ void preload_and_pin_pages(const void *buffer, size_t size)
   }
 }
 
+/** Unpin preloaded pages. */
 void unpin_preloaded_pages(const void *buffer, size_t size)
 {
   struct supplemental_page_table *supt = thread_current()->supt;

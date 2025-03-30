@@ -167,6 +167,8 @@ file_tell (struct file *file)
   return file->pos;
 }
 
+/** Returns the sector number of 
+   open file descriptors for FILE's inode. */
 int
 file_get_inumber (struct file *file)
 {
