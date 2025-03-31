@@ -2,7 +2,7 @@
 
 [中文版本](./README-cn.md)
 
-This repository contains reference solution example code and [Beamer resources](./beamer) for the operating systems course experiments at Wuhan University. The experiments are adapted from the framework code of Peking University's undergraduate operating systems honor track program.
+This repository contains reference solution example code and [Beamer resources](./beamer) for the operating systems course experiments [Pintos](https://pintos-os.org/) at Wuhan University. The experiments are adapted from the framework code of Peking University's undergraduate operating systems honor track program.
 
 [Pintos](http://pintos-os.org) is an educational operating system targeting 32-bit x86 architectures. It provides a challenging yet manageable complexity, with a simple yet sufficient design to understand operating system principles (runnable on emulators like QEMU, Bochs, VMWare Player, or physical x86 machines). The main codebase, documentation, and project tasks were developed by Ben Pfaff from Stanford University and others.
 
