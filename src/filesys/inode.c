@@ -13,7 +13,7 @@
 #define INODE_MAGIC 0x494e4f44
 
 /* 128 pointers per block */
-#define INDIRECT_PTRS BLOCK_SECTOR_SIZE / sizeof (block_sector_t*)
+#define INDIRECT_PTRS BLOCK_SECTOR_SIZE / sizeof (block_sector_t)
 
 /* 4 DIRECT, 9 INDIRECT, 1 DOUBLE INDIRECT = 14 BLOCK PTRS */
 #define DIRECT_BLOCKS 4
@@ -349,7 +349,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
   /* beyond EOF, need extend */
   if(offset + size > inode_length(inode))
   {
-    // no sync required for dirs
+    /* no sync required for dirs */
     if(!inode->is_dir)
       lock_acquire(&inode->lock);
 
@@ -389,7 +389,7 @@ inode_write_at (struct inode *inode, const void *buffer_, off_t size,
       offset += chunk_size;
       bytes_written += chunk_size;
     }
-  // free (bounce);
+
   inode->read_length = inode_length(inode);
   return bytes_written;
 }

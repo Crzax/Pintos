@@ -92,6 +92,7 @@ filesys_open (const char *name)
 
   if (dir != NULL)
   {
+    /* file path == ".." */
   	if (strcmp(file_name, "..") == 0)
   	{
       inode = dir_parent_inode(dir);
@@ -101,6 +102,7 @@ filesys_open (const char *name)
   	    return NULL;
   	  }
   	}
+    /* file path == "/" || file path == "." */
     else if ((dir_is_root(dir) && strlen(file_name) == 0) ||
 	       strcmp(file_name, ".") == 0)
   	{
