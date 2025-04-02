@@ -13,6 +13,7 @@
 #include "threads/malloc.h"
 #include "threads/synch.h"
 #include "lib/kernel/list.h"
+#include <string.h>
 #ifdef VM
 #include "vm/page.h"
 #endif
@@ -341,6 +342,9 @@ sys_open(const char* file)
 {
   /* memory validation */
   check_user((const uint8_t*) file);
+  
+  if (strlen(file) == 0) 
+    return -1;
   
   struct file* file_opened;
   struct file_desc* fd = palloc_get_page(0);

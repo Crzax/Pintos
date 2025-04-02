@@ -83,11 +83,15 @@ filesys_create (const char *name, off_t initial_size, bool is_dir)
 struct file *
 filesys_open (const char *name)
 {
-  if(strlen(name) == 0)
+  if (name == NULL || strlen(name) == 0)
     return NULL;
 
   struct dir* dir = path_to_dir(name);
   char* file_name = path_to_name(name);
+  if (file_name == NULL) {
+    dir_close(dir);
+    return NULL;
+  }
   struct inode *inode = NULL;
 
   if (dir != NULL)
@@ -219,6 +223,9 @@ path_to_name(const char* path_name)
     prev = cur;
 
   char* name = malloc(strlen(prev) + 1);
+  if (name == NULL) 
+    return NULL;
+  
   memcpy(name, prev, strlen(prev) + 1);
   return name;
 }

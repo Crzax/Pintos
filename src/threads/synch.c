@@ -372,8 +372,24 @@ cond_sema_greater_priority (const struct list_elem *a, const struct list_elem *b
 {
   struct semaphore_elem *sa = list_entry (a, struct semaphore_elem, elem);
   struct semaphore_elem *sb = list_entry (b, struct semaphore_elem, elem);
-  return list_entry(list_front(&sa->semaphore.waiters), struct thread, elem)->priority > list_entry(list_front(&sb->semaphore.waiters), struct thread, elem)->priority;
+  
+  /* Check if both semaphores are empty */
+  bool a_empty = list_empty(&sa->semaphore.waiters);
+  bool b_empty = list_empty(&sb->semaphore.waiters);
+  
+  if (a_empty && b_empty)
+    return false; /**< Both semaphores are empty, no priority. */
+  if (a_empty)
+    return false; /**< a is empty, b has higher priority. */
+  if (b_empty)
+    return true;  /**< b is empty, a has higher priority. */
+  
+  /* Both semaphores are not empty, compare the priorities */
+  struct thread *ta = list_entry(list_front(&sa->semaphore.waiters), struct thread, elem);
+  struct thread *tb = list_entry(list_front(&sb->semaphore.waiters), struct thread, elem);
+  return ta->priority > tb->priority;
 }
+
 /** Wakes up all threads, if any, waiting on COND (protected by
    LOCK).  LOCK must be held before calling this function.
 

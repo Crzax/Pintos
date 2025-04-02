@@ -63,9 +63,8 @@ This repository is designed for Wuhan University's operating systems course expe
 | ![Project3](./assets/3.png) | ![Project4](./assets/4.png) |
 
 **Important Notes:**
-- I **did not** implement "independent operations on different cache blocks". Instead, all cache operations are locked globally.
 - When evicting physical pages, only the current process's pages are considered - other processes' pages cannot be evicted.
-- These are two potential optimization areas if further development is needed.
+- These is a potential optimization area if further development is needed.
 - **Direct submission of this code for course assignments is strongly discouraged.**
 
 ## Acknowledgments

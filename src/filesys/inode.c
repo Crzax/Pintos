@@ -8,6 +8,7 @@
 #include "threads/malloc.h"
 #include "filesys/cache.h"
 #include "threads/synch.h"
+#include "threads/thread.h"
 
 /** Identifies an inode. */
 #define INODE_MAGIC 0x494e4f44
@@ -319,9 +320,12 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
        chunk_size);
       cache_array[cache_idx].accessed = true;
       cache_array[cache_idx].open_cnt--;
-
-     
-      
+#ifdef VM
+      if (offset + BLOCK_SECTOR_SIZE < inode->length) {
+        block_sector_t next_sector = sector_idx + 1;
+        schedule_read_ahead(next_sector);
+    }
+#endif 
       /* Advance. */
       size -= chunk_size;
       offset += chunk_size;

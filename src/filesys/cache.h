@@ -7,12 +7,15 @@
 
 #define CACHE_MAX_SIZE 64
 
+enum cache_state { FREE, LOADING, READY };
+
 struct disk_cache 
 {    
     uint8_t block[BLOCK_SECTOR_SIZE];   /**< 512 Bytes */
     block_sector_t disk_sector;         /**< disk sector */
-
-    bool is_free;                       /**< is free */
+    enum cache_state state;             /**< cache state */
+    struct lock entry_lock;             /**< lock for entry */
+    struct condition loading_cond;      /**< condition for loading */
     int open_cnt;                       /**< open count */
     bool accessed;                      /**< accessed */
     bool dirty;                         /**< dirty */  
@@ -24,13 +27,11 @@ struct disk_cache cache_array[64];      /**< cache array */
 /** Cache functions */
 void init_entry(int idx);
 void init_cache(void);
-int get_cache_entry(block_sector_t disk_sector);
+int find_cache_entry(block_sector_t disk_sector);
 int get_free_entry(void);
 int access_cache_entry(block_sector_t disk_sector, bool dirty);
-int replace_cache_entry(block_sector_t disk_sector, bool dirty);
 void func_periodic_writer(void *aux);
 void write_back(bool clear);
-void func_read_ahead(void *aux);
-void ahead_reader(block_sector_t);
+void schedule_read_ahead(block_sector_t sector);
 
 #endif /**< filesys/cache.h */ 
