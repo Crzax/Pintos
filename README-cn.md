@@ -2,7 +2,7 @@
 
   [English version](./README.md)
 
-  这个仓库包含了武汉大学操作系统课程实验[Pintos](https://pintos-os.org/)的参考解答示例代码和授课[Beamer资源](./beamer)，实验基于北京大学本科操作系统课程荣誉轨道的框架代码改编而来。
+  这个仓库包含了[Pintos](https://pintos-os.org/)的参考解答示例代码和授课[Beamer资源](./beamer)。
 
   [Pintos](http://pintos-os.org) 是一个面向 32 位 x86 的教学操作系统，具有挑战性但不过于复杂，其设计简洁却足够深入理解操作系统原理（可在 QEMU、Bochs、VMWare Player 等模拟器或真实 x86 机器上运行）。主代码、文档和实验任务由斯坦福大学的 Ben Pfaff 等人开发。
 
